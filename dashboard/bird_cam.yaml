@@ -1,0 +1,138 @@
+# Bird Cam dashboard for the Vicohome MQTT Bridge.
+# Paste into a dashboard's raw configuration editor (or use it as one view).
+# Clip links use <a target="_blank">: HA's frontend hijacks same-origin markdown links (/local/...) and
+# navigates to the default view instead of opening the file.
+# Entity ids assume the camera is named "Bird Cam" in the Vicohome app.
+title: Bird Cam
+views:
+  - title: Bird Cam
+    path: bird-cam
+    icon: mdi:bird
+    type: sections
+    max_columns: 3
+    sections:
+      - type: grid
+        cards:
+          - type: heading
+            heading: Latest visitor
+            icon: mdi:bird
+          - type: picture-entity
+            entity: image.bird_cam_snapshot
+            show_name: false
+            show_state: false
+            tap_action:
+              action: more-info
+            grid_options:
+              columns: full
+          - type: markdown
+            grid_options:
+              columns: full
+            content: >-
+              {% set e = 'sensor.bird_cam_last_bird' %}
+              {% set a = states[e].attributes if states[e] is not none else {} %}
+              {% if states(e) in ['unknown', 'unavailable'] %}
+              _Waiting for the first visit..._
+              {% else %}
+              ## {{ states(e) }}
+              {%- if a.get('latin') %} <small>*{{ a.get('latin') }}*</small>{% endif %}
+
+              {% if a.get('confidence') %}**{{ a.get('confidence') | round(0) | int }}%** confident · {% endif -%}
+              {% if a.get('time') %}{{ relative_time(as_datetime(a.get('time'))) }} ago ({{ as_datetime(a.get('time')) | as_local | as_timestamp | timestamp_custom('%a %H:%M') }}){% endif %}
+              {%- if a.get('period') %} · {{ a.get('period') | round(0) | int }} s clip{% endif %}
+              {%- if a.get('clip_url') %} · <a href="{{ a.get('clip_url') }}" target="_blank">▶ play clip</a>{% elif a.get('video_url') %} · <small>clip still processing</small>{% endif %}
+              {% endif %}
+          - type: tile
+            entity: sensor.bird_cam_visits_today
+            name: Visits today
+          - type: tile
+            entity: binary_sensor.bird_cam_motion
+            name: At the feeder
+
+      - type: grid
+        cards:
+          - type: heading
+            heading: Today
+            icon: mdi:calendar-today
+          - type: markdown
+            grid_options:
+              columns: full
+            content: >-
+              {% set e = 'sensor.bird_cam_visits_today' %}
+              {% set a = states[e].attributes if states[e] is not none else {} %}
+              {% if not a.get('recent') %}
+              _No visits recorded yet._
+              {% else %}
+              {% if a.get('by_bird') %}**{{ states(e) }} visits** ·
+              {% for bird, n in (a.get('by_bird') or {}).items() %}{{ bird }} ×{{ n }}{{ ', ' if not loop.last }}{% endfor %}
+              {% endif %}
+
+              | Time | Bird | Conf. | Clip |
+              |:--|:--|--:|:-:|
+              {% for r in a.get('recent') -%}
+              | {{ as_datetime(r.time) | as_local | as_timestamp | timestamp_custom('%a %H:%M') }} | {{ r.bird }} | {{ (r.confidence | round(0) | int ~ '%') if r.confidence else '–' }} | {{ '<a href="' ~ r.clip_url ~ '" target="_blank">▶</a>' if r.clip_url else '' }} |
+              {% endfor %}
+              {% endif %}
+
+              <small>Saved snapshots: Media → My media → vicohome</small>
+          - type: logbook
+            target:
+              entity_id: event.bird_cam_visit
+            hours_to_show: 48
+            grid_options:
+              columns: full
+
+      - type: grid
+        cards:
+          - type: heading
+            heading: Camera health
+            icon: mdi:heart-pulse
+          - type: tile
+            entity: sensor.bird_cam_battery
+            name: Battery
+          - type: tile
+            entity: sensor.bird_cam_wifi_signal
+            name: Wi-Fi
+          - type: tile
+            entity: binary_sensor.bird_cam_online
+            name: Camera
+          - type: tile
+            entity: binary_sensor.bird_cam_charging
+            name: Charging
+          - type: tile
+            entity: sensor.bird_cam_cloud_status
+            name: Cloud bridge
+          - type: tile
+            entity: sensor.bird_cam_last_cloud_poll
+            name: Last poll
+          - type: tile
+            entity: sensor.bird_cam_clip_storage
+            name: Clip storage
+          - type: tile
+            entity: sensor.bird_cam_clip_limit
+            name: Clip limit
+          - type: markdown
+            grid_options:
+              columns: full
+            content: >-
+              {% set a = states.sensor.bird_cam_clip_storage.attributes if states.sensor.bird_cam_clip_storage is not none else {} %}
+              **Clips:** {{ a.get('count', '?') }} of {{ a.get('limit', '?') }} kept
+              ({{ states('sensor.bird_cam_clip_storage') }} MB, {{ a.get('free_gb', '?') }} GB free) ·
+              today {{ a.get('today_visits', 0) }} visits ·
+              full-day streak {{ a.get('full_streak', 0) }}/2 · light-day streak {{ a.get('light_streak', 0) }}/7
+
+              {% if a.get('audits') %}
+              | Day | Visits | Limit | Result |
+              |:--|--:|--:|:--|
+              {% for r in a.get('audits') | reverse -%}
+              | {{ r.date }} | {{ r.visits }} | {{ r.limit_before }}{{ ' → ' ~ r.limit_after if r.limit_after != r.limit_before }} | {{ '🟥 filled' if r.filled else '🟩 fit' }} {{ '· ' ~ r.action if r.action != 'keep' }} |
+              {% endfor %}
+              {% else %}
+              _First daily audit runs after midnight._
+              {% endif %}
+          - type: history-graph
+            title: Battery (7 days)
+            hours_to_show: 168
+            entities:
+              - entity: sensor.bird_cam_battery
+            grid_options:
+              columns: full

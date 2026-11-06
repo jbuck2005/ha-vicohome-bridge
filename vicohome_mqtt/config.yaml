@@ -1,0 +1,56 @@
+name: "Vicohome MQTT Bridge"
+version: "0.3.0"
+slug: "vicohome_mqtt"
+description: "Vicohome bird-feeder cameras in Home Assistant over MQTT: newest bird, snapshot image, visit events, battery and Wi-Fi."
+url: "https://github.com/jbuck2005/ha-vicohome-bridge"
+arch:
+  - aarch64
+  - amd64
+init: true
+startup: application
+boot: auto
+services:
+  - mqtt:need
+map:
+  - type: media
+    read_only: false
+  - type: homeassistant_config
+    read_only: false
+options:
+  email: ""
+  password: ""
+  region: "us"
+  poll_interval: 60
+  bootstrap_hours: 24
+  image_source: "keyshot"
+  save_images: true
+  retention_days: 30
+  motion_seconds: 60
+  save_clips: true
+  clips_to_keep: 60
+  clips_max: 600
+  base_topic: "vicohome_mqtt"
+  log_level: "info"
+schema:
+  email: email
+  password: password
+  region: list(us|eu)
+  api_base_override: url?
+  poll_interval: int(30,3600)
+  bootstrap_hours: int(0,168)
+  image_source: list(keyshot|image)
+  save_images: bool
+  media_folder: str?
+  retention_days: int(0,3650)
+  motion_seconds: int(5,600)
+  save_clips: bool
+  clips_to_keep: int(1,5000)
+  clips_max: int(1,5000)
+  clip_folder: str?
+  base_topic: str
+  discovery_prefix: str?
+  log_level: list(debug|info|warning|error)
+  mqtt_host: str?
+  mqtt_port: port?
+  mqtt_username: str?
+  mqtt_password: password?
