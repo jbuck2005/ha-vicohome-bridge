@@ -200,12 +200,29 @@ class VicohomeClient:
         except OSError as err:
             LOG.warning("Could not cache the API token: %s", err)
 
+    def _post_http(self, url: str, **kwargs: Any) -> requests.Response:
+        """POST, retrying once on a fresh connection if the server dropped the old one.
+
+        The API closes idle keep-alive connections after less than a minute, about as
+        often as the bridge polls, so now and then a request goes out on a connection
+        the server is closing and fails with RemoteDisconnected. The calls are reads
+        or a login, so sending one again is safe. Timeouts aren't retried, so a cloud
+        that is really down doesn't double the wait.
+        """
+        try:
+            return self._session.post(url, timeout=self._timeout, **kwargs)
+        except requests.ConnectionError as err:
+            if isinstance(err, requests.Timeout):
+                raise
+            LOG.debug("Connection dropped (%s), retrying once", err.__class__.__name__)
+            return self._session.post(url, timeout=self._timeout, **kwargs)
+
     def login(self) -> None:
         LOG.info("Logging in to Vicohome (%s)", self.base)
         try:
-            resp = self._session.post(f"{self.base}/account/login", timeout=self._timeout,
-                                      json={"email": self._email, "password": self._password,
-                                            "loginType": 0})
+            resp = self._post_http(f"{self.base}/account/login",
+                                   json={"email": self._email, "password": self._password,
+                                         "loginType": 0})
             body = resp.json()
         except (requests.RequestException, ValueError) as err:
             raise VicohomeError(f"login request failed: {err.__class__.__name__}") from None
@@ -222,8 +239,8 @@ class VicohomeClient:
         if not self._token:
             self.login()
         try:
-            resp = self._session.post(f"{self.base}{path}", json=payload, timeout=self._timeout,
-                                      headers={"Authorization": self._token})
+            resp = self._post_http(f"{self.base}{path}", json=payload,
+                                   headers={"Authorization": self._token})
         except requests.RequestException as err:
             raise VicohomeError(f"{path}: {err.__class__.__name__}") from None
         text = resp.text.lstrip()

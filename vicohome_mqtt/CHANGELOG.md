@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1
+- A poll no longer fails when the Vicohome cloud has just closed the connection: the request is
+  sent once more on a new connection. The cloud closes idle connections after less than a minute,
+  about as often as the bridge polls, so Cloud status used to show "error" for a minute many times
+  a day. Timeouts are still not retried.
+
 ## 0.3.0
 - Self-sizing clip limit with a daily audit (grow after 2 filled days in a row, shrink after 7
   light days); default minimum 60, maximum 600. New sensors: Clip storage (MB) and Clip limit.
