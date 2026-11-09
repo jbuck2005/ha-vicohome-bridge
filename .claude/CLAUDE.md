@@ -4,6 +4,7 @@ Standing rules for AI assistants working in this repository.
 
 ## Commits and pull requests
 - Never credit Claude or any AI assistant: no `Co-Authored-By` or session trailers, no "Generated with" lines, no AI author or committer. Commits show only the maintainer.
+- Exception: Dependabot's dependency PRs may be merged with `dependabot[bot]` as author. Don't flag them, and don't redo their commits under the maintainer's name.
 - Author and committer email: `59450931+jbuck2005@users.noreply.github.com`.
 - Name branches `dev/<topic>`. Never put "claude" in a branch name: merging copies it into the history of `main`.
 - Keep "claude" and "anthropic" out of commit messages and PR titles, including for changes to this file (write "project rules").
