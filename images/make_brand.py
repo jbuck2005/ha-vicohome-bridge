@@ -15,6 +15,10 @@ SKY = (0x3E, 0xA0, 0xD8, 255)
 CYAN = (0x75, 0xD6, 0xF9, 255)
 WING = (0x2B, 0x7F, 0xB4, 255)
 MIST = (0xA9, 0xB8, 0xC8, 255)
+# un-subscribird's wordmark, measured from its logo: "un-" / "subscri" / "bird"
+UNSUB_RED = (0xD7, 0x4B, 0x29, 255)
+UNSUB_AMBER = (0xEC, 0x87, 0x24, 255)
+UNSUB_TEAL = (0x2D, 0x80, 0xA5, 255)
 
 
 FONTS = Path(__file__).resolve().parent / "fonts"  # see BRANDING.md for where to get them
@@ -123,10 +127,10 @@ def banner(mascot_path, w=1280, h=320):
     tx = 280
     wordmark(d, tx, 78, 54)
     d.text((tx + 4, 160), "Camera in. Wings out.", font=font(BODY, 28), fill=CYAN)
-    # un-subscribird keeps its own colours: "un-subscri" orange, "bird" sky blue
+    # un-subscribird keeps its own wordmark colours
     f, x = font(BODY, 16), tx + 4
     for text, fill in (("The Home Assistant link between your Vicohome camera and ", MIST),
-                       ("un-subscri", ORANGE), ("bird", SKY), (".", MIST)):
+                       ("un-", UNSUB_RED), ("subscri", UNSUB_AMBER), ("bird", UNSUB_TEAL), (".", MIST)):
         d.text((x, 210), text, font=f, fill=fill)
         x += d.textlength(text, font=f)
     return out

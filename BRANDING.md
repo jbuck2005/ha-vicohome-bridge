@@ -13,8 +13,9 @@ side of a bridge.
   weight. It mirrors un-subscribird's split (`un-subscri` / `bird`): orange marks the part that
   breaks free.
 - **Tagline:** *Camera in. Wings out.*
-- When a graphic names **un-subscribird**, it keeps its own colours: `un-subscri` in Liberation
-  Orange, `bird` in Tech Sky Blue.
+- When a graphic names **un-subscribird**, it keeps the colours of its logo: `un-` in `#D74B29`,
+  `subscri` in `#EC8724` and `bird` in `#2D80A5`. These are measured from the logo itself and
+  differ from the palette hexes below. On a light background its tagline is navy `#0B2945`.
 - The add-on's store name stays **Vicohome MQTT Bridge**, a plain description of what it does.
 - This project has no connection with Vicohome. Never use Vicohome's logo, and never word or
   draw anything to suggest it's an official Vicohome product.
