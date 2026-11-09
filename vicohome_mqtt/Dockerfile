@@ -1,6 +1,6 @@
 # The base image is pinned here on purpose: some Supervisor versions ignore build.yaml and
 # pass their own BUILD_FROM (an Alpine base without pip).
-FROM python:3.12-alpine3.20
+FROM python:3.13-alpine3.20
 
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 RUN apk add --no-cache ffmpeg
