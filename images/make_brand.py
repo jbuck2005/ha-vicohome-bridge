@@ -123,8 +123,12 @@ def banner(mascot_path, w=1280, h=320):
     tx = 280
     wordmark(d, tx, 78, 54)
     d.text((tx + 4, 160), "Camera in. Wings out.", font=font(BODY, 28), fill=CYAN)
-    d.text((tx + 4, 210), "The Home Assistant link between your Vicohome camera and un-subscribird.",
-           font=font(BODY, 16), fill=MIST)
+    # un-subscribird keeps its own colours: "un-subscri" orange, "bird" sky blue
+    f, x = font(BODY, 16), tx + 4
+    for text, fill in (("The Home Assistant link between your Vicohome camera and ", MIST),
+                       ("un-subscri", ORANGE), ("bird", SKY), (".", MIST)):
+        d.text((x, 210), text, font=f, fill=fill)
+        x += d.textlength(text, font=f)
     return out
 
 
