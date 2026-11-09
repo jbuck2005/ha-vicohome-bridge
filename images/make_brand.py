@@ -6,7 +6,7 @@ Writes icon.png (128x128) and logo.png (250x100) into addon_dir, and a README ba
 import sys
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageFont
 
 S = 8  # supersampling
 ABYSS = (0x14, 0x21, 0x32, 255)
@@ -89,13 +89,33 @@ def mark(size, tile=True):
     return out.resize((size, size), Image.LANCZOS)
 
 
+def wifi_text(draw, x, y, text, f, fill):
+    """Draw text with a wifi symbol in place of the first i's dot, as un-subscribird does on "bird"."""
+    head, _, tail = text.partition("i")
+    draw.text((x, y), head + "ı" + tail, font=f, fill=fill)  # dotless i
+    # Find the dot: the pixels "i" has and "ı" lacks.
+    w, h = int(f.getlength("i")) * 3, int(f.size * 2)
+    with_dot, dotless = Image.new("L", (w, h)), Image.new("L", (w, h))
+    ImageDraw.Draw(with_dot).text((w // 3, 0), "i", font=f, fill=255)
+    ImageDraw.Draw(dotless).text((w // 3, 0), "ı", font=f, fill=255)
+    x0, y0, x1, y1 = ImageChops.subtract(with_dot, dotless).getbbox()
+    size = y1 - y0
+    cx = x + draw.textlength(head, font=f) + (x0 + x1) / 2 - w // 3
+    cy = y + (y0 + y1) / 2 + size * 0.15
+    r = size * 0.42
+    draw.ellipse((cx - r, cy - r, cx + r, cy + r), fill=fill)
+    for arc_r in (size * 1.15, size * 1.9):
+        draw.arc((cx - arc_r, cy - arc_r, cx + arc_r, cy + arc_r), 228, 312, fill=fill,
+                 width=max(1, round(size * 0.38)))
+    return draw.textlength(text, font=f)
+
+
 def wordmark(draw, x, y, px, s=1):
     """'vicohome' in Tech Sky Blue, '-bridge' in Liberation Orange (mirrors un-subscri|bird)."""
     f = font(HEAVY, px * s)
     draw.text((x * s, y * s), "vicohome", font=f, fill=SKY)
     w = draw.textlength("vicohome", font=f)
-    draw.text((x * s + w, y * s), "-bridge", font=f, fill=ORANGE)
-    return w + draw.textlength("-bridge", font=f)
+    return w + wifi_text(draw, x * s + w, y * s, "-bridge", f, ORANGE)
 
 
 def logo(w=250, h=100):
@@ -104,10 +124,10 @@ def logo(w=250, h=100):
     d.rounded_rectangle((0, 0, w * S - 1, h * S - 1), radius=18 * S, fill=ABYSS)
     m = mark(76, tile=False).resize((76 * S, 76 * S), Image.LANCZOS)
     out.paste(m, (6 * S, 10 * S), m)
-    f = font(HEAVY, 25 * S)
-    d.text((86 * S, 12 * S), "vicohome", font=f, fill=SKY)
-    d.text((86 * S, 40 * S), "-bridge", font=f, fill=ORANGE)
-    d.text((88 * S, 74 * S), "Camera in. Wings out.", font=font(BODY, 11 * S), fill=MIST)
+    f = font(HEAVY, 24 * S)
+    d.text((86 * S, 6 * S), "vicohome", font=f, fill=SKY)
+    wifi_text(d, 86 * S, 41 * S, "-bridge", f, ORANGE)
+    d.text((88 * S, 77 * S), "Camera in. Wings out.", font=font(BODY, 11 * S), fill=MIST)
     return out.resize((w, h), Image.LANCZOS)
 
 
