@@ -16,9 +16,15 @@ Tested with the Vicohome CG625 bird-feeder camera.
 - Brand: [`BRANDING.md`](BRANDING.md), a sibling of un-subscribird
 
 ## Install
-Settings -> Add-ons -> Add-on store -> ... -> Repositories -> add this repository's URL, then
-install **Vicohome MQTT Bridge**. Or copy `vicohome_mqtt/` into the `/addons` (local add-ons)
-folder and reload the store.
+[![Open your Home Assistant instance and show the add add-on repository dialog with this repository pre-filled.](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fjbuck2005%2Fha-vicohome-bridge)
+[![Open your Home Assistant instance and show the Vicohome MQTT Bridge add-on.](https://my.home-assistant.io/badges/supervisor_addon.svg)](https://my.home-assistant.io/redirect/supervisor_addon/?addon=d4fab3cf_vicohome_mqtt&repository_url=https%3A%2F%2Fgithub.com%2Fjbuck2005%2Fha-vicohome-bridge)
+
+The first button adds this repository to your add-on store; the second opens the add-on, adding
+the repository first if needed. Then click **Install**.
+
+Or by hand: Settings -> Add-ons -> Add-on store -> ... -> Repositories -> add this repository's
+URL, then install **Vicohome MQTT Bridge**. Or copy `vicohome_mqtt/` into the `/addons` (local
+add-ons) folder and reload the store.
 
 This project has no connection with Vicohome. The dashboard assumes a camera named "Bird Cam": replace `bird_cam` with
 your camera's name.
