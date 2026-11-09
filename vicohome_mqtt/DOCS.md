@@ -25,10 +25,14 @@ over MQTT (with discovery). Needs the Mosquitto broker add-on and the MQTT integ
 ## Options
 | Option | Default | |
 |---|---|---|
+| `email`, `password` | | The Vicohome account (see Setup). Never logged. |
+| `region` | us | `us` or `eu`: the Vicohome cloud region of the account. |
+| `api_base_override` | | Leave empty. Only for testing against another API server. |
 | `poll_interval` | 60 | Seconds between cloud polls (30-3600). |
 | `bootstrap_hours` | 24 | History loaded on the very first start (no events fired for it). |
 | `image_source` | keyshot | `keyshot` (the frame the AI picked) or `image` (clip cover); falls back to the other. |
 | `save_images` | true | Keep snapshots in `/media/<media_folder>/<camera>/<date>/` (Media panel). |
+| `media_folder` | vicohome | Folder under `/media`. |
 | `retention_days` | 30 | Delete saved snapshots older than this (0 = keep forever). |
 | `motion_seconds` | 60 | How long the motion sensor stays on. |
 | `save_clips` | true | Turn each visit's clip into an MP4 in `/config/www/<clip_folder>/`, linked as `clip_url` (`/local/...`). |
@@ -36,7 +40,9 @@ over MQTT (with discovery). Needs the Mosquitto broker add-on and the MQTT integ
 | `clips_max` | 600 | The limit never grows past this. |
 | `clip_folder` | vicohome | Folder under `/config/www`. |
 | `base_topic` | vicohome_mqtt | MQTT topic root. |
-| `mqtt_host` ... | (Supervisor) | Only needed for an external broker. |
+| `discovery_prefix` | homeassistant | Home Assistant's MQTT discovery prefix. |
+| `log_level` | info | `debug`, `info`, `warning` or `error`. |
+| `mqtt_host`, `mqtt_port`, `mqtt_username`, `mqtt_password` | (Supervisor) | Only needed for an external broker. |
 
 ## Clips
 Vicohome serves clips as HLS playlists (`.m3u8`) whose segments are signed cloud links that
