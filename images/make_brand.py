@@ -17,17 +17,26 @@ WING = (0x2B, 0x7F, 0xB4, 255)
 MIST = (0xA9, 0xB8, 0xC8, 255)
 
 
-def font(names, px):
-    for name in names:
+FONTS = Path(__file__).resolve().parent / "fonts"  # see BRANDING.md for where to get them
+
+
+def font(choices, px):
+    """First font that loads: (file, variable-font style) pairs, brand font first."""
+    for name, style in choices:
         try:
-            return ImageFont.truetype(name, px)
+            f = ImageFont.truetype(str(name), px)
         except OSError:
             continue
+        if style:
+            f.set_variation_by_name(style)
+        if name != choices[0][0]:
+            print(f"warning: {choices[0][0]} not found, using {name}", file=sys.stderr)
+        return f
     return ImageFont.load_default(px)
 
 
-HEAVY = ["Montserrat-ExtraBold.ttf", "seguibl.ttf", "segoeuib.ttf", "DejaVuSans-Bold.ttf"]
-BODY = ["Inter-Medium.ttf", "segoeuib.ttf", "DejaVuSans.ttf"]
+HEAVY = [(FONTS / "Montserrat.ttf", "ExtraBold"), ("seguibl.ttf", None), ("DejaVuSans-Bold.ttf", None)]
+BODY = [(FONTS / "Inter.ttf", "Medium"), ("segoeuib.ttf", None), ("DejaVuSans.ttf", None)]
 
 
 def mark(size, tile=True):
@@ -109,13 +118,13 @@ def banner(mascot_path, w=1280, h=320):
     ImageDraw.Draw(art).rectangle((1165, 640, 1300, 900), fill=(0, 0, 0, 0))
     bird = art.crop((222, 377, 1300, 1119))
     bird.thumbnail((340, 280), Image.LANCZOS)
-    bx = w - bird.width - 50
+    bx = w - bird.width - 30
     out.paste(bird, (bx, (h - bird.height) // 2), bird)
     tx = 280
     wordmark(d, tx, 78, 54)
     d.text((tx + 4, 160), "Camera in. Wings out.", font=font(BODY, 28), fill=CYAN)
     d.text((tx + 4, 210), "The Home Assistant link between your Vicohome camera and un-subscribird.",
-           font=font(BODY, 17), fill=MIST)
+           font=font(BODY, 16), fill=MIST)
     return out
 
 

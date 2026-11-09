@@ -48,5 +48,13 @@ All three images are drawn by [`images/make_brand.py`](images/make_brand.py) (ne
 python images/make_brand.py vicohome_mqtt images/banner.png <un-subscribird logo png>
 ```
 
-It uses Montserrat ExtraBold and Inter when they're installed, otherwise Segoe UI Black and
-Segoe UI Bold (the current images use Segoe UI).
+It sets the wordmark in Montserrat ExtraBold and the tagline in Inter Medium, read from
+`images/fonts/` (gitignored). Fetch both from Google Fonts' repo (SIL Open Font License):
+
+```
+mkdir -p images/fonts
+curl -fL -o images/fonts/Montserrat.ttf "https://raw.githubusercontent.com/google/fonts/main/ofl/montserrat/Montserrat%5Bwght%5D.ttf"
+curl -fL -o images/fonts/Inter.ttf "https://raw.githubusercontent.com/google/fonts/main/ofl/inter/Inter%5Bopsz,wght%5D.ttf"
+```
+
+Without them it falls back to Segoe UI or DejaVu Sans and prints a warning.
