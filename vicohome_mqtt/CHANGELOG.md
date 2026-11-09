@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.2
+- Removed `init`, `startup` and `boot` from the add-on config. They were set to the
+  Supervisor defaults, so the add-on behaves the same.
+
 ## 0.3.1
 - A poll no longer fails when the Vicohome cloud has just closed the connection: the request is
   sent once more on a new connection. The cloud closes idle connections after less than a minute,

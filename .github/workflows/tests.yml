@@ -37,6 +37,11 @@ jobs:
           cache-dependency-path: vicohome_mqtt/requirements.txt
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
       - run: pip install -r vicohome_mqtt/requirements.txt
+      - name: Create the add-on's mount points
+        # The bridge uses the paths Supervisor mounts into the container.
+        run: |
+          sudo mkdir -p /data /media /homeassistant
+          sudo chown "$USER" /data /media /homeassistant
       - name: Start an anonymous MQTT broker
         run: |
           docker run -d --name mqtt -p 1883:1883 eclipse-mosquitto:2 mosquitto -c /mosquitto-no-auth.conf
