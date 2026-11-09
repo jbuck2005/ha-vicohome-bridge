@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.3.4
+- Logo: a wifi symbol replaces the dot on the "i" of "-bridge", as on the "i" of un-subscribird's "bird".
+
 ## 0.3.3
 - The bridge now reports the right version in MQTT discovery and its status (it said 0.3.1 in 0.3.2).
 - Option names and descriptions in the add-on's Configuration tab.
