@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.3
+- The bridge now reports the right version in MQTT discovery and its status (it said 0.3.1 in 0.3.2).
+- Option names and descriptions in the add-on's Configuration tab.
+- Every option is documented in DOCS.md.
+- Icon and logo in the un-subscribird sibling brand (see BRANDING.md).
+- Python 3.13 base image; paho-mqtt 2.2.0, requests 2.34.2, tzdata 2026.6.
+
 ## 0.3.2
 - Removed `init`, `startup` and `boot` from the add-on config. They were set to the
   Supervisor defaults, so the add-on behaves the same.

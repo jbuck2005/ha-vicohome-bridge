@@ -1,0 +1,67 @@
+configuration:
+  email:
+    name: Vicohome email
+    description: Email of the Vicohome account to poll. Use a separate account the camera is shared with.
+  password:
+    name: Vicohome password
+    description: Password of that account. Never logged.
+  region:
+    name: Region
+    description: Vicohome cloud region of the account.
+  api_base_override:
+    name: API base URL override
+    description: Leave empty. Only for testing against another API server.
+  poll_interval:
+    name: Poll interval
+    description: Seconds between cloud polls (30-3600).
+  bootstrap_hours:
+    name: Initial history
+    description: Hours of history loaded on the very first start. No events are fired for it.
+  image_source:
+    name: Snapshot source
+    description: keyshot (the frame the AI picked) or image (the clip cover). Falls back to the other.
+  save_images:
+    name: Save snapshots
+    description: Keep each snapshot under /media, browsable in the Media panel.
+  media_folder:
+    name: Snapshot folder
+    description: Folder under /media for saved snapshots (default vicohome).
+  retention_days:
+    name: Snapshot retention
+    description: Delete saved snapshots older than this many days (0 keeps them forever).
+  motion_seconds:
+    name: Motion duration
+    description: Seconds the motion sensor stays on after a new visit.
+  save_clips:
+    name: Save clips
+    description: Turn each visit's clip into an MP4 under /config/www, linked as clip_url. Files there are served without a login.
+  clips_to_keep:
+    name: Minimum clip limit
+    description: Starting and minimum number of clips kept (about 3 MB each).
+  clips_max:
+    name: Maximum clip limit
+    description: The self-sizing clip limit never grows past this.
+  clip_folder:
+    name: Clip folder
+    description: Folder under /config/www for clips (default vicohome).
+  base_topic:
+    name: MQTT base topic
+    description: Root of the bridge's MQTT topics.
+  discovery_prefix:
+    name: MQTT discovery prefix
+    description: Home Assistant's MQTT discovery prefix (default homeassistant).
+  log_level:
+    name: Log level
+    description: How much the add-on logs.
+  mqtt_host:
+    name: MQTT host
+    description: Only for an external broker. Leave empty to use the Mosquitto add-on.
+  mqtt_port:
+    name: MQTT port
+    description: Only for an external broker.
+  mqtt_username:
+    name: MQTT username
+    description: Only for an external broker.
+  mqtt_password:
+    name: MQTT password
+    description: Only for an external broker. Never logged.
