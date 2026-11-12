@@ -3,6 +3,10 @@
 A downloaded .m3u8 is only a list of expiring cloud links and most players refuse it, so the
 bridge remuxes each clip (no re-encoding) into an MP4 under Home Assistant's /config/www,
 which HA serves at /local/... . Only the newest N clips are kept.
+
+The cloud can list a visit, with a finished-looking playlist, before the whole video is uploaded,
+and add segments later. So a clip is only made once its playlist stops growing, and is checked
+again a few times afterwards; if the playlist grew, the file is made again under the same name.
 """
 
 from __future__ import annotations
@@ -21,6 +25,9 @@ LOG = logging.getLogger("vicohome.clips")
 TRACE_RE = re.compile(r"^[A-Za-z0-9_-]{4,80}$")
 MAX_ATTEMPTS = 10
 GIVE_UP_AFTER_S = 45 * 60
+TRUST_AFTER_S = 5 * 60  # after this, make the clip even if the playlist is still changing
+RECHECK_AFTER_S = (120, 300, 900, 1800)  # look for a longer playlist this long after saving
+PERIOD_SLACK_S = 1.5
 
 
 def playlist_ready(text: str) -> bool:
@@ -29,6 +36,22 @@ def playlist_ready(text: str) -> bool:
         return False
     has_segment = any(line.strip() and not line.startswith("#") for line in text.splitlines())
     return has_segment and "#EXT-X-ENDLIST" in text
+
+
+def playlist_size(text: str) -> tuple[int, float]:
+    """(segments, seconds) of a playlist."""
+    segments = sum(1 for line in text.splitlines() if line.strip() and not line.startswith("#"))
+    seconds = 0.0
+    for match in re.finditer(r"^#EXTINF:([0-9.]+)", text, re.M):
+        try:
+            seconds += float(match.group(1))
+        except ValueError:
+            pass
+    return segments, round(seconds, 2)
+
+
+def grew(new: tuple[int, float], old: tuple[int, float] | None) -> bool:
+    return old is not None and (new[0] > old[0] or new[1] > old[1] + 0.5)
 
 
 def clip_name(trace_id: str) -> str:
@@ -44,51 +67,119 @@ def files_to_prune(existing: list[str], keep_trace_ids: list[str]) -> list[str]:
 
 class ClipMaker:
     def __init__(self, folder: Path, url_prefix: str, fetch_text: Callable[[str], str | None],
-                 ffmpeg: str = "ffmpeg", timeout_s: int = 180) -> None:
+                 ffmpeg: str = "ffmpeg", timeout_s: int = 180,
+                 clock: Callable[[], float] = time.time) -> None:
         self.folder = folder
         self.url_prefix = url_prefix.rstrip("/")
         self.fetch_text = fetch_text
         self.ffmpeg = ffmpeg
         self.timeout_s = timeout_s
-        self.pending: dict[str, dict] = {}  # trace_id -> {serial, video_url, attempts, since}
+        self.clock = clock
+        # trace_id -> {serial, video_url, period, attempts, since, visit, size}
+        self.pending: dict[str, dict] = {}
+        # Clips already saved that may still grow: trace_id -> {serial, video_url, period, size, saved, checks, due}
+        self.rechecks: dict[str, dict] = {}
         self.failed: set[str] = set()  # gave up; not retried until the add-on restarts
 
     def url_for(self, trace_id: str) -> str:
         return f"{self.url_prefix}/{clip_name(trace_id)}"
 
-    def queue(self, serial: str, trace_id: str, video_url: str) -> str | None:
+    def queue(self, serial: str, trace_id: str, video_url: str, period: float | None = None,
+              visit_ts: float | None = None) -> str | None:
         """Queue a clip. Returns its URL straight away if the file already exists."""
         if not TRACE_RE.match(trace_id):
             return None
         if (self.folder / clip_name(trace_id)).exists():
             return self.url_for(trace_id)
         if video_url and trace_id not in self.pending and trace_id not in self.failed:
-            self.pending[trace_id] = {"serial": serial, "video_url": video_url,
-                                      "attempts": 0, "since": time.time()}
+            now = self.clock()
+            self.pending[trace_id] = {"serial": serial, "video_url": video_url, "period": period,
+                                      "attempts": 0, "since": now, "visit": min(visit_ts or now, now),
+                                      "size": None}
         return None
 
+    def update(self, trace_id: str, video_url: str, period: float | None) -> None:
+        """Newer details of a visit from the cloud: its video may have grown since it was queued."""
+        job = self.pending.get(trace_id) or self.rechecks.get(trace_id)
+        if not job:
+            return
+        if video_url:
+            job["video_url"] = video_url
+        if period is not None:
+            job["period"] = period
+        if trace_id in self.rechecks and self._short_of_period(job):
+            job["due"] = self.clock()  # the cloud says the video is longer than our file: look now
+
+    @staticmethod
+    def _short_of_period(job: dict) -> bool:
+        return bool(job.get("period") and job.get("size") and job["period"] > job["size"][1] + PERIOD_SLACK_S)
+
     def process(self, budget_s: float = 120) -> list[tuple[str, str, str]]:
-        """Try the pending clips. Returns (serial, trace_id, url) for each one made."""
-        made, start = [], time.time()
+        """Try the pending clips. Returns (serial, trace_id, url) for each one made.
+
+        A clip made again because the cloud's video grew keeps its URL, so it is not returned.
+        """
+        made, start = [], self.clock()
         for trace_id, job in sorted(self.pending.items(), key=lambda kv: kv[1]["since"]):
-            if time.time() - start > budget_s:
+            if self.clock() - start > budget_s:
                 break
             job["attempts"] += 1
-            ok = self._make(trace_id, job["video_url"])
+            ok = self._make(trace_id, job)
             if ok:
                 made.append((job["serial"], trace_id, self.url_for(trace_id)))
-            if ok or job["attempts"] >= MAX_ATTEMPTS or time.time() - job["since"] > GIVE_UP_AFTER_S:
+            if ok or job["attempts"] >= MAX_ATTEMPTS or self.clock() - job["since"] > GIVE_UP_AFTER_S:
                 if not ok:
                     LOG.warning("Gave up on the clip for %s after %d tries", trace_id, job["attempts"])
                     self.failed.add(trace_id)
                 del self.pending[trace_id]
+        for trace_id, job in list(self.rechecks.items()):
+            if self.clock() - start > budget_s:
+                break
+            if self.clock() >= job["due"]:
+                self._recheck(trace_id, job)
         return made
 
-    def _make(self, trace_id: str, video_url: str) -> bool:
-        text = self.fetch_text(video_url)
+    def _make(self, trace_id: str, job: dict) -> bool:
+        text = self.fetch_text(job["video_url"])
         if not text or not playlist_ready(text):
             LOG.debug("Clip %s not ready yet", trace_id)
             return False
+        size, last = playlist_size(text), job["size"]
+        job["size"] = size
+        if self.clock() - job["visit"] < TRUST_AFTER_S:
+            # Wait until two fetches a poll apart agree and the playlist is as long as the visit.
+            if last is None or size != last or self._short_of_period(job):
+                LOG.debug("Clip %s may still be growing (%d segments, %.1f s)", trace_id, *size)
+                return False
+        if not self._remux(trace_id, text):
+            return False
+        now = self.clock()
+        self.rechecks[trace_id] = {"serial": job["serial"], "video_url": job["video_url"],
+                                   "period": job.get("period"), "size": size, "saved": now,
+                                   "checks": 0, "due": now + RECHECK_AFTER_S[0]}
+        return True
+
+    def _recheck(self, trace_id: str, job: dict) -> None:
+        job["checks"] += 1
+        if job["checks"] >= len(RECHECK_AFTER_S):
+            del self.rechecks[trace_id]
+        else:
+            job["due"] = job["saved"] + RECHECK_AFTER_S[job["checks"]]
+        if not (self.folder / clip_name(trace_id)).exists():  # pruned meanwhile
+            self.rechecks.pop(trace_id, None)
+            return
+        text = self.fetch_text(job["video_url"])
+        if not text or not playlist_ready(text):
+            return
+        size = playlist_size(text)
+        if not grew(size, job["size"]):
+            return
+        LOG.info("Clip %s grew in the cloud (%.1f s -> %.1f s), saving it again",
+                 trace_id, job["size"][1], size[1])
+        if self._remux(trace_id, text):
+            job["size"] = size
+
+    def _remux(self, trace_id: str, text: str) -> bool:
         self.folder.mkdir(parents=True, exist_ok=True)
         final = self.folder / clip_name(trace_id)
         tmp_out = self.folder / f".{trace_id}.part.mp4"
@@ -108,7 +199,8 @@ class ClipMaker:
                 tmp_out.unlink(missing_ok=True)
                 return False
             os.replace(tmp_out, final)
-            LOG.info("Saved clip %s (%d kB)", final.name, final.stat().st_size // 1024)
+            LOG.info("Saved clip %s (%d kB, %.1f s)", final.name, final.stat().st_size // 1024,
+                     playlist_size(text)[1])
             return True
         except (subprocess.TimeoutExpired, OSError) as err:
             LOG.warning("Clip %s failed: %s", trace_id, err.__class__.__name__)
