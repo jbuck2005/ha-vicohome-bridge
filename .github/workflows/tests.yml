@@ -2,7 +2,7 @@ name: Tests
 
 on:
   push:
-    branches: [main]
+    branches: [main, edge]
   pull_request:
   workflow_dispatch:
 
@@ -15,6 +15,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2  # a PR is checked out as its merge commit; HEAD^1 is the base branch
+      - name: Add-on version bumped (PRs into edge)
+        # The edge add-on only offers an update when the version changes. Dependabot can't bump it;
+        # its updates reach the edge add-on with the next bump.
+        if: github.base_ref == 'edge' && github.actor != 'dependabot[bot]'
+        run: |
+          git diff --quiet HEAD^1 -- vicohome_mqtt/ && exit 0
+          old=$(git show HEAD^1:vicohome_mqtt/config.yaml | sed -n 's/^version: "\(.*\)"/\1/p')
+          new=$(sed -n 's/^version: "\(.*\)"/\1/p' vicohome_mqtt/config.yaml)
+          echo "edge has $old, this PR has $new"
+          if [ "$old" = "$new" ]; then
+            echo "::error file=vicohome_mqtt/config.yaml::Bump the version (e.g. 0.3.6-dev.2) so the edge add-on offers this change"
+            exit 1
+          fi
       - uses: actions/setup-python@v7
         with:
           # Matches the python:3.13 base image in the Dockerfile.
