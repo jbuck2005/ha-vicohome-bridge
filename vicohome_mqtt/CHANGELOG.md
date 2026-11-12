@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.5
+- Clips are no longer cut short. Since 12 November 2026 the Vicohome cloud lists a visit, with a
+  playlist that looks finished, when only the first 2 seconds are uploaded, and adds the rest
+  later. The bridge now waits until a new visit's playlist is the same on two polls in a row (and
+  as long as the cloud's video length, for at most 5 minutes), so `clip_url` arrives about one poll
+  later than before. It then checks the playlist again 2, 5, 15 and 30 minutes after saving and
+  makes the MP4 again under the same name if it grew.
+- A visit's `period` (video length) in the `last` topic and the state file follows the cloud's
+  newer value instead of keeping the one from when the visit was first listed. The `event` topic
+  still carries the first value.
+
 ## 0.3.4
 - Logo: a wifi symbol replaces the dot on the "i" of "-bridge", as on the "i" of un-subscribird's "bird".
 

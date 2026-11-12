@@ -123,6 +123,24 @@ class Tracker:
             cam["last"] = hist[0]  # history is newest first, so this is always the newest event
         return new
 
+    def refresh(self, events: list[Event]) -> int:
+        """Take the newer video length (and its link) of visits already recorded.
+
+        Only a changed period counts: the cloud may sign the links afresh on every query, and
+        rewriting the state file each poll would wear the SD card.
+        """
+        changed = 0
+        for ev in events:
+            cam = self.cameras.get(ev.serial) or {}
+            recs = [r for r in cam.get("history", []) if r["trace_id"] == ev.trace_id]
+            if ev.period is None or not recs or recs[0].get("period") == ev.period:
+                continue
+            changed += 1
+            self.set_field(ev.serial, ev.trace_id, "period", ev.period)
+            if ev.video_url:
+                self.set_field(ev.serial, ev.trace_id, "video_url", ev.video_url)
+        return changed
+
     def set_field(self, serial: str, trace_id: str, key: str, value: Any) -> None:
         self.dirty = True
         cam = self.cameras.get(serial) or {}

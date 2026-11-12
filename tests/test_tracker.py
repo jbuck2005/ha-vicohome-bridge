@@ -71,6 +71,22 @@ def test_duplicates_are_not_republished(tmp_path):
     assert tr2.last("abc123")["trace_id"] == "c"
 
 
+def test_refresh_takes_a_longer_period_but_ignores_relinked_urls(tmp_path):
+    path = str(tmp_path / "s.json")
+    tr = Tracker(path, TZ)
+    short = raw("a", 1793826000) | {"period": 2.0, "videoUrl": "https://vid/a.m3u8?sig=1"}
+    tr.ingest([parse_event(short)])
+    tr.save()
+    tr = Tracker(path, TZ)  # after a restart "last" and the history row are separate dicts
+    assert tr.refresh([parse_event(short | {"videoUrl": "https://vid/a.m3u8?sig=2"})]) == 0
+    assert not tr.dirty and tr.last("abc123")["video_url"].endswith("sig=1")
+    assert tr.refresh([parse_event(short | {"period": 20.0, "videoUrl": "https://vid/a.m3u8?sig=3"}),
+                       parse_event(raw("unknown", 1793826600))]) == 1
+    assert tr.dirty
+    for rec in (tr.last("abc123"), tr.recent("abc123", 1)[0]):
+        assert rec["period"] == 20.0 and rec["video_url"].endswith("sig=3")
+
+
 def test_late_listed_older_event_does_not_replace_last(tmp_path):
     tr = Tracker(str(tmp_path / "s.json"), TZ)
     tr.ingest([parse_event(raw("new", 1793826600))])

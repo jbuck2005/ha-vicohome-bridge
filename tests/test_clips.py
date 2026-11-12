@@ -5,7 +5,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "vicohome_mqtt" / "app"))
 
-from clips import ClipMaker, clip_name, files_to_prune, playlist_ready  # noqa: E402
+from clips import ClipMaker, clip_name, files_to_prune, playlist_ready, playlist_size  # noqa: E402
 
 COMPLETE = "#EXTM3U\n#EXT-X-VERSION:3\n#EXTINF:2.0,\nhttps://x/a.ts?sig=1\n#EXT-X-ENDLIST\n"
 
@@ -48,6 +48,98 @@ def test_not_ready_clip_is_retried_then_dropped(tmp_path):
         assert "slow0001" in cm.pending
     cm.process()
     assert "slow0001" not in cm.pending and "slow0001" in cm.failed
+
+
+def playlist(*durations, ended=True):
+    body = "".join(f"#EXTINF:{d},\nhttps://x/{i}.ts?sig=1\n" for i, d in enumerate(durations))
+    return "#EXTM3U\n#EXT-X-VERSION:3\n" + body + ("#EXT-X-ENDLIST\n" if ended else "")
+
+
+def test_playlist_size():
+    assert playlist_size(playlist(2.0, 2.0, 1.5)) == (3, 5.5)
+    assert playlist_size(COMPLETE) == (1, 2.0)
+
+
+class FakeCloud:
+    """A clock and a playlist that can change between polls; remuxes are recorded, not run."""
+
+    def __init__(self, tmp_path, text):
+        self.now, self.text, self.saved = 1_000_000.0, text, []
+        self.cm = ClipMaker(tmp_path, "/local/v", lambda url: self.text, clock=lambda: self.now)
+        self.cm._remux = self.remux
+
+    def remux(self, trace_id, text):
+        self.saved.append((trace_id, playlist_size(text)))
+        (self.cm.folder / clip_name(trace_id)).write_bytes(b"mp4")
+        return True
+
+    def poll(self, seconds=60):
+        self.now += seconds
+        return self.cm.process()
+
+
+def test_new_visit_waits_until_the_playlist_stops_growing(tmp_path):
+    fc = FakeCloud(tmp_path, playlist(2.0))  # the cloud lists the visit after the first segment
+    fc.cm.queue("cam", "grow0001", "https://v", period=2.0, visit_ts=fc.now - 20)
+    assert fc.poll(0) == []  # first sight: never trusted
+    fc.text = playlist(2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0)
+    assert fc.poll() == []  # grew: wait again
+    assert fc.poll() == [("cam", "grow0001", "/local/v/grow0001.mp4")]
+    assert fc.saved == [("grow0001", (10, 20.0))]
+
+
+def test_new_visit_waits_while_the_cloud_says_the_video_is_longer(tmp_path):
+    fc = FakeCloud(tmp_path, playlist(2.0))
+    fc.cm.queue("cam", "grow0002", "https://v", period=2.0, visit_ts=fc.now)
+    fc.cm.update("grow0002", "https://v2", 20.0)
+    assert fc.poll(0) == [] and fc.poll() == []  # stable, but 18 s short of the period
+    assert fc.cm.pending["grow0002"]["video_url"] == "https://v2"
+    for _ in range(3):
+        fc.poll()
+    assert fc.poll() != []  # five minutes after the visit: saved anyway
+    assert fc.saved == [("grow0002", (1, 2.0))]
+
+
+def test_old_visit_is_saved_at_once(tmp_path):
+    fc = FakeCloud(tmp_path, playlist(2.0, 2.0))
+    fc.cm.queue("cam", "old00001", "https://v", period=4.0, visit_ts=fc.now - 3600)
+    assert fc.poll(0) != []
+
+
+def test_saved_clip_is_made_again_when_the_cloud_video_grows(tmp_path):
+    fc = FakeCloud(tmp_path, playlist(2.0))
+    fc.cm.queue("cam", "late0001", "https://v", period=2.0, visit_ts=fc.now - 30)
+    fc.poll(0)
+    assert fc.poll() != []  # looked finished twice: saved short
+    fc.text = playlist(*[2.0] * 9)
+    assert fc.poll(60) == []  # before the first recheck
+    assert fc.poll(60) == []  # recheck at 2 min: made again, same URL, so not reported as new
+    assert fc.saved == [("late0001", (1, 2.0)), ("late0001", (9, 18.0))]
+    for _ in range(40):  # no more growth: no more remuxes, and the rechecks end
+        fc.poll()
+    assert len(fc.saved) == 2 and not fc.cm.rechecks
+
+
+def test_longer_period_triggers_an_early_recheck(tmp_path):
+    fc = FakeCloud(tmp_path, playlist(2.0))
+    fc.cm.queue("cam", "late0002", "https://v", visit_ts=fc.now - 600)
+    fc.poll(0)
+    fc.text = playlist(*[2.0] * 10)
+    fc.cm.update("late0002", "https://v3", 2.0)  # not longer than the file: wait for the schedule
+    assert fc.poll(5) == [] and len(fc.saved) == 1
+    fc.cm.update("late0002", "https://v3", 20.0)
+    fc.poll(5)
+    assert fc.saved[-1] == ("late0002", (10, 20.0))
+
+
+def test_recheck_stops_when_the_clip_was_pruned(tmp_path):
+    fc = FakeCloud(tmp_path, playlist(2.0))
+    fc.cm.queue("cam", "gone0001", "https://v", visit_ts=fc.now - 600)
+    fc.poll(0)
+    fc.cm.prune([])
+    fc.text = playlist(2.0, 2.0)
+    fc.poll(200)
+    assert fc.saved == [("gone0001", (1, 2.0))] and not fc.cm.rechecks
 
 
 from clips import ClipBudget  # noqa: E402

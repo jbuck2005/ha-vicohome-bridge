@@ -28,7 +28,7 @@ from clips import ClipBudget, ClipMaker
 from tracker import Tracker
 from vicohome import AuthError, Device, Event, VicohomeClient, VicohomeError
 
-VERSION = "0.3.4"
+VERSION = "0.3.5"
 LOG = logging.getLogger("vicohome")
 OPTIONS_FILE = "/data/options.json"
 STATE_FILE = "/data/state.json"
@@ -399,6 +399,12 @@ class Bridge:
         new: list[Event] = self.tracker.ingest(events)
         if new:
             LOG.info("%d new event(s)%s", len(new), " (initial history load)" if bootstrap else "")
+        # The query window overlaps earlier polls, so recent visits come back with the cloud's
+        # newer video length: a clip can grow after the visit is first listed.
+        self.tracker.refresh(events)
+        if self.clips:
+            for ev in events:
+                self.clips.update(ev.trace_id, ev.video_url, ev.period)
 
         newest: dict[str, dict[str, Any]] = {}
         for ev in new:
@@ -413,7 +419,8 @@ class Bridge:
                 self.handle_image(rec, publish=True)
                 self.publish_live_event(rec)
                 if self.clips:
-                    self.clips.queue(ev.serial, ev.trace_id, rec.get("video_url", ""))  # made at the end of the poll
+                    self.clips.queue(ev.serial, ev.trace_id, rec.get("video_url", ""),  # made at the end of the poll
+                                     rec.get("period"), rec["timestamp"])
         if bootstrap:
             for serial, rec in newest.items():  # show the newest picture once, no event/motion
                 self.handle_image(rec, publish=True)
@@ -421,7 +428,8 @@ class Bridge:
             for serial in self.tracker.cameras:
                 for rec in self.tracker.recent(serial, min(RECENT_IN_ATTRIBUTES, self.budget.cap)):
                     if not rec.get("clip_url"):
-                        url = self.clips.queue(serial, rec["trace_id"], rec.get("video_url", ""))
+                        url = self.clips.queue(serial, rec["trace_id"], rec.get("video_url", ""),
+                                               rec.get("period"), rec["timestamp"])
                         if url:
                             self.tracker.set_field(serial, rec["trace_id"], "clip_url", url)
 

@@ -1,7 +1,9 @@
 """End-to-end check: fake Vicohome API + real MQTT broker + the bridge.
 
 Run (needs a broker at $MQTT_HOST, anonymous):  python tests/e2e_fake_cloud.py
-Poll 1 = initial history (no events fired), poll 2 adds a new bird that must fire.
+Poll 1 = initial history (no events fired), poll 2 adds a new bird that must fire. As the real
+cloud does since Nov 2026, its clip is first listed with only one segment and grows by poll 3;
+the bridge must wait and save the whole clip on poll 4.
 """
 
 import json
@@ -35,12 +37,22 @@ def make_hls():
     return "\n".join(lines) + "\n"
 
 
+def first_segment(playlist):
+    lines = playlist.splitlines()
+    first = next(i for i, l in enumerate(lines) if not l.startswith("#"))
+    return "\n".join(lines[:first + 1] + ["#EXT-X-ENDLIST"]) + "\n"
+
+
 PLAYLIST = ""
 
 
-def ev(trace, ts, bird=None):
+def live_grown():
+    return CALLS["events"] >= 3
+
+
+def ev(trace, ts, bird=None, period=20.0):
     e = {"traceId": trace, "timestamp": ts, "serialNumber": "cam0001", "deviceName": "Bird Cam",
-         "period": 20.0, "imageUrl": f"http://127.0.0.1:8765/img/{trace}",
+         "period": period, "imageUrl": f"http://127.0.0.1:8765/img/{trace}",
          "keyshots": [{"imageUrl": f"http://127.0.0.1:8765/img/{trace}"}],
          "videoUrl": f"http://127.0.0.1:8765/vid/{trace}"}
     if bird:
@@ -74,14 +86,15 @@ class Fake(BaseHTTPRequestHandler):
             CALLS["events"] += 1
             items = [ev("old2", NOW - 3600, "Robin"), ev("old1", NOW - 7200)]  # newest first
             if CALLS["events"] >= 2:
-                items.insert(0, ev("live1", NOW - 5, "Blue Jay"))
+                items.insert(0, ev("live1", NOW - 5, "Blue Jay", 4.0 if live_grown() else 2.0))
             return self._json({"code": 0, "data": {"list": items}})
         self._json({"code": 404, "msg": "nope"})
 
     def do_GET(self):
         path = self.path.split("?")[0]
         if path.startswith("/vid/"):
-            body, ctype = PLAYLIST.encode(), "application/vnd.apple.mpegurl"
+            text = PLAYLIST if path != "/vid/live1" or live_grown() else first_segment(PLAYLIST)
+            body, ctype = text.encode(), "application/vnd.apple.mpegurl"
         elif path.startswith("/seg/"):
             body, ctype = (HLS_DIR / path[5:]).read_bytes(), "application/octet-stream"
         else:
@@ -121,7 +134,7 @@ def main():
     b = bridge.Bridge(bridge.load_options())
     t = threading.Thread(target=b.run, daemon=True)
     t.start()
-    time.sleep(36)  # two polls
+    time.sleep(96)  # four polls
     b.stop.set()
     t.join(10)
     time.sleep(1)
@@ -165,7 +178,9 @@ def main():
     import subprocess
     probe = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
                             "/homeassistant/www/vicohome/live1.mp4"], capture_output=True, text=True)
-    check(probe.returncode == 0 and float(probe.stdout or 0) > 3, f"clip is a valid MP4 ({probe.stdout.strip()} s)")
+    check(probe.returncode == 0 and float(probe.stdout or 0) > 3,
+          f"clip is a valid MP4 with every segment, not just the first ({probe.stdout.strip()} s)")
+    check(last.get("period") == 4.0, f"last has the cloud's newer period ({last.get('period')})")
     check(last.get("clip_url") == "/local/vicohome/live1.mp4", f"last has clip_url ({last.get('clip_url')})")
     check(today["recent"][0].get("clip_url") == "/local/vicohome/live1.mp4", "recent rows have clip_url")
     cs = json.loads(topics["vicohome_mqtt/clips"][-1])
