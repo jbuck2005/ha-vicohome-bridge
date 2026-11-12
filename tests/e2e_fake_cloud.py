@@ -30,7 +30,7 @@ def make_hls():
     HLS_DIR.mkdir(exist_ok=True)
     subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "testsrc=size=320x240:rate=10",
                     "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=16000", "-t", "4",
-                    "-c:v", "libx264", "-c:a", "aac", "-f", "hls", "-hls_time", "2",
+                    "-c:v", "libx264", "-g", "10", "-c:a", "aac", "-f", "hls", "-hls_time", "2",
                     "-hls_list_size", "0", str(HLS_DIR / "p.m3u8")], check=True)
     lines = [(f"http://127.0.0.1:8765/seg/{l}?X-Amz-Signature=abc" if l.endswith(".ts") else l)
              for l in (HLS_DIR / "p.m3u8").read_text().splitlines()]
@@ -109,6 +109,7 @@ class Fake(BaseHTTPRequestHandler):
 def main():
     global PLAYLIST
     PLAYLIST = make_hls()
+    assert PLAYLIST.count("#EXTINF") >= 2, "the test clip needs several segments to test a growing playlist"
     os.makedirs("/homeassistant/www", exist_ok=True)
     Path("/homeassistant/configuration.yaml").write_text("# test\n")
     host = os.environ.get("MQTT_HOST", "127.0.0.1")
