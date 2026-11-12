@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.5
+## Unreleased
 - Clips are no longer cut short. Since 12 November 2026 the Vicohome cloud lists a visit, with a
   playlist that looks finished, when only the first 2 seconds are uploaded, and adds the rest
   later. The bridge now waits until a new visit's playlist is the same on two polls in a row (and
