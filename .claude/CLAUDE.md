@@ -7,6 +7,7 @@ Standing rules for AI assistants working in this repository.
 - Exception: Dependabot's dependency PRs may be merged with `dependabot[bot]` as author. Don't flag them, and don't redo their commits under the maintainer's name.
 - Author and committer email: `59450931+jbuck2005@users.noreply.github.com`.
 - Name branches `dev/<topic>`. Never put "claude" in a branch name: merging copies it into the history of `main`.
+- PRs go into `edge`, not `main`. `edge` merges into `main` only as a release, when the maintainer says so. Never force-push `edge`.
 - Keep "claude" and "anthropic" out of commit messages and PR titles, including for changes to this file (write "project rules").
 - Stage files by name. Never `git add -A` or `git add .`.
 - Never force-push `main`.
@@ -20,7 +21,8 @@ Standing rules for AI assistants working in this repository.
 ## Code
 - This is a ground-up rewrite. Don't copy code from `KIWIDUDE564/vicohome-bridge-addon`: it has no licence. `dydx/vico-cli` is MIT. Keep both credits in the README.
 - This project has no connection with Vicohome, and the docs must not suggest one.
-- Bump `version` in `vicohome_mqtt/config.yaml` and add to `vicohome_mqtt/CHANGELOG.md` for changes to the add-on.
+- For changes to the add-on, bump the edge build in `vicohome_mqtt/config.yaml` and `VERSION` in `bridge.py` (`0.3.5` -> `0.3.6-dev.1` -> `0.3.6-dev.2`), and add to `## Unreleased` in `vicohome_mqtt/CHANGELOG.md`. CI fails a PR into `edge` that changes `vicohome_mqtt/` without a new version.
+- A release (a PR from `edge` into `main`) sets the plain version (`0.3.6`) and renames `## Unreleased` to it.
 
 ## Checks
 - Run `pytest tests` before committing.
