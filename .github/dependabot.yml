@@ -2,13 +2,16 @@ version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
+    target-branch: edge
     schedule:
       interval: monthly
   - package-ecosystem: pip
     directory: /vicohome_mqtt
+    target-branch: edge
     schedule:
       interval: monthly
   - package-ecosystem: docker
     directory: /vicohome_mqtt
+    target-branch: edge
     schedule:
       interval: monthly

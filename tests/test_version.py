@@ -13,4 +13,13 @@ def test_bridge_version_matches_config():
 
 def test_changelog_has_current_version():
     config = re.search(r'^version:\s*"([^"]+)"', (ADDON / "config.yaml").read_text(), re.M).group(1)
-    assert f"## {config}\n" in (ADDON / "CHANGELOG.md").read_text()
+    changelog = (ADDON / "CHANGELOG.md").read_text()
+    if "-dev." in config:  # an edge build: its changes wait under "Unreleased" for the release
+        assert "## Unreleased\n" in changelog
+    else:
+        assert f"## {config}\n" in changelog
+
+
+def test_version_is_a_release_or_an_edge_build():
+    config = re.search(r'^version:\s*"([^"]+)"', (ADDON / "config.yaml").read_text(), re.M).group(1)
+    assert re.fullmatch(r"\d+\.\d+\.\d+(-dev\.\d+)?", config), config
