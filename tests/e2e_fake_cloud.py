@@ -3,9 +3,10 @@
 Run (needs a broker at $MQTT_HOST, anonymous):  python tests/e2e_fake_cloud.py
 Poll 1 = initial history (no events fired), poll 2 adds a new bird that must fire. As the real
 cloud does since Nov 2026, its clip is first listed with only one segment and grows by poll 3;
-the bridge must wait and save the whole clip on poll 4. An old visit (old3) whose cloud video
-is also cut short at first is saved short at once (it is hours old), and the hourly clip repair,
-brought forward to poll 4, must make it again whole.
+the bridge must wait and save the whole clip on poll 4. Two older visits are saved short at once
+(they are hours old): old3, whose cloud video has grown by then, is made whole by the hourly clip
+repair brought forward to poll 4; old1 grows only afterwards, and the "Re-fetch clips" command
+must then make it again.
 """
 
 import json
@@ -23,6 +24,7 @@ sys.path.insert(0, str(APP))
 
 NOW = int(time.time())
 CALLS = {"login": 0, "events": 0}
+OLD1_GROWN = threading.Event()
 JPEG = b"\xff\xd8\xff\xe0fakejpeg\xff\xd9"
 HLS_DIR = Path("/tmp/hls")
 
@@ -89,7 +91,7 @@ class Fake(BaseHTTPRequestHandler):
         if self.path == "/library/newselectlibrary":
             CALLS["events"] += 1
             items = [ev("old2", NOW - 3600, "Robin"), ev("old3", NOW - 5400, "Finch", 4.0),
-                     ev("old1", NOW - 7200)]  # newest first
+                     ev("old1", NOW - 7200, period=2.0)]  # newest first
             if CALLS["events"] >= 2:
                 items.insert(0, ev("live1", NOW - 5, "Blue Jay", 4.0 if live_grown() else 2.0))
             return self._json({"code": 0, "data": {"list": items}})
@@ -98,7 +100,9 @@ class Fake(BaseHTTPRequestHandler):
     def do_GET(self):
         path = self.path.split("?")[0]
         if path.startswith("/vid/"):
-            text = PLAYLIST if path not in ("/vid/live1", "/vid/old3") or live_grown() else first_segment(PLAYLIST)
+            short = (path in ("/vid/live1", "/vid/old3") and not live_grown()) \
+                or (path == "/vid/old1" and not OLD1_GROWN.is_set())
+            text = first_segment(PLAYLIST) if short else PLAYLIST
             body, ctype = text.encode(), "application/vnd.apple.mpegurl"
         elif path.startswith("/seg/"):
             body, ctype = (HLS_DIR / path[5:]).read_bytes(), "application/octet-stream"
@@ -111,9 +115,20 @@ class Fake(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
+def duration(trace):
+    import subprocess
+    probe = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
+                            f"/homeassistant/www/vicohome/{trace}.mp4"], capture_output=True, text=True)
+    try:
+        return float(probe.stdout)
+    except ValueError:
+        return 0.0
+
+
 def main():
     global PLAYLIST
     PLAYLIST = make_hls()
+    assert PLAYLIST.count("#EXTINF") >= 2, "the test clip needs several segments to test a growing playlist"
     os.makedirs("/homeassistant/www", exist_ok=True)
     Path("/homeassistant/configuration.yaml").write_text("# test\n")
     host = os.environ.get("MQTT_HOST", "127.0.0.1")
@@ -143,6 +158,10 @@ def main():
     t = threading.Thread(target=b.run, daemon=True)
     t.start()
     time.sleep(96)  # four polls
+    old1_before = duration("old1")
+    OLD1_GROWN.set()
+    sub.publish("vicohome_mqtt/clips/refetch", "3")  # hours, as an automation would send
+    time.sleep(8)
     b.stop.set()
     t.join(10)
     time.sleep(1)
@@ -159,7 +178,7 @@ def main():
             fails.append(msg)
 
     disc = [t for t in topics if t.startswith("homeassistant/") and t.endswith("/config")]
-    check(len(disc) == 15, f"15 discovery configs ({len(disc)})")
+    check(len(disc) == 17, f"17 discovery configs ({len(disc)})")
     for d in disc:
         json.loads(topics[d][-1])
     last = json.loads(topics["vicohome_mqtt/cam0001/last"][-1])
@@ -183,24 +202,24 @@ def main():
     check(CALLS["login"] == 1, f"logged in once ({CALLS['login']})")
     clips = sorted(p.name for p in Path("/homeassistant/www/vicohome").glob("*.mp4"))
     check(clips == ["live1.mp4", "old1.mp4", "old2.mp4", "old3.mp4"], f"4 MP4 clips made ({clips})")
-    import subprocess
-
-    def probe(name):
-        res = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
-                              f"/homeassistant/www/vicohome/{name}.mp4"], capture_output=True, text=True)
-        return float(res.stdout or 0) if res.returncode == 0 else 0.0
-    check(probe("live1") > 3, f"clip is a valid MP4 with every segment, not just the first ({probe('live1')} s)")
-    check(probe("old3") > 3, f"old short clip was made again whole by the clip repair ({probe('old3')} s)")
+    check(duration("live1") > 3, f"clip is a valid MP4 with every segment, not just the first ({duration('live1')} s)")
+    # old3: short on disk, then made whole by the hourly clip repair on poll 4
+    check(duration("old3") > 3, f"old short clip was made again whole by the clip repair ({duration('old3')} s)")
     from clips import mp4_seconds
-    check(abs((mp4_seconds(Path("/homeassistant/www/vicohome/old3.mp4")) or 0) - probe("old3")) < 0.1,
+    check(abs((mp4_seconds(Path("/homeassistant/www/vicohome/old3.mp4")) or 0) - duration("old3")) < 0.1,
           "mp4_seconds agrees with ffprobe")
     old3 = next(r for r in b.tracker.recent("cam0001", 10) if r["trace_id"] == "old3")
     check(old3.get("clip_repairs") == 1 and (old3.get("clip_seconds") or 0) > 3,
           f"state records the repair ({old3.get('clip_repairs')}) and the length ({old3.get('clip_seconds')})")
+    # old1: still short after the polls, then made whole by the manual Re-fetch command
+    check(old1_before < 3 < duration("old1"), f"re-fetch made the short old1 clip again ({old1_before} s -> {duration('old1')} s)")
     check(last.get("period") == 4.0, f"last has the cloud's newer period ({last.get('period')})")
     check(last.get("clip_url") == "/local/vicohome/live1.mp4", f"last has clip_url ({last.get('clip_url')})")
     check(today["recent"][0].get("clip_url") == "/local/vicohome/live1.mp4", "recent rows have clip_url")
     cs = json.loads(topics["vicohome_mqtt/clips"][-1])
+    check((cs.get("last_refetch") or {}).get("remade") == 1 and cs["last_refetch"]["checked"] == 4
+          and cs["last_refetch"]["hours"] == 3, f"re-fetch summary published ({cs.get('last_refetch')})")
+    check(topics.get("vicohome_mqtt/clips/refetch_hours", [b""])[-1] == b"2", "re-fetch hours entity has its default")
     check(cs["count"] == 4 and cs["limit"] == 60 and cs["size_mb"] >= 0, f"clip storage published ({cs['count']} clips, limit {cs['limit']})")
     from datetime import date, timedelta
     yday = (date.today() - timedelta(days=1)).isoformat()
