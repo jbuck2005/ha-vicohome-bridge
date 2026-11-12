@@ -66,6 +66,15 @@ Just after local midnight the bridge audits the previous day (only days it saw c
 `sensor.<cam>_clip_storage` (MB) carries count, limit, streaks, free space and the last 14 audits;
 `sensor.<cam>_clip_limit` is the current limit.
 
+### Re-fetching clips
+`button.<cam>_re_fetch_clips` looks again at the saved clips of the last `number.<cam>_re_fetch_hours`
+hours (default 2, up to 24). For each one it compares the MP4's length with the cloud's playlist and
+makes the MP4 again, under the same name, when the cloud now has more video. Only clips still on disk
+are looked at, so the clip limit holds. The log gets one line, e.g. `Re-fetched clips: checked 12,
+re-made 9, unchanged 2, gone from the cloud 1`, and the same counts are in the `last_refetch`
+attribute of `sensor.<cam>_clip_storage`.
+An automation can also publish a number of hours to `<base_topic>/clips/refetch`, e.g. `6`.
+
 ## How it differs from the original vicohome-bridge add-on
 - Only **new** events are published, oldest first, so "last" is always the newest visit
   (the old add-on re-sent the whole day newest-first, leaving the oldest one as "last").

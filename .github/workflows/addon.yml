@@ -51,3 +51,4 @@ jobs:
           docker run --rm --platform ${{ matrix.platform }} --entrypoint python3 vicohome_mqtt:ci-${{ matrix.arch }} \
             -c "import paho.mqtt, requests; import vicohome, clips, tracker; print('ok')"
           docker run --rm --platform ${{ matrix.platform }} --entrypoint ffmpeg vicohome_mqtt:ci-${{ matrix.arch }} -version
+          docker run --rm --platform ${{ matrix.platform }} --entrypoint ffprobe vicohome_mqtt:ci-${{ matrix.arch }} -version

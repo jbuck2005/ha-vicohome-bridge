@@ -202,3 +202,30 @@ def test_budget_shrinks_after_seven_light_days_but_not_below_minimum():
 
 def test_budget_minimum_raises_an_old_cap():
     assert ClipBudget({"cap": 30}, 60, 600).cap == 60
+
+
+def test_refetch_remakes_only_clips_the_cloud_has_more_of(tmp_path):
+    playlists = {"https://v/short": playlist(2.0, 2.0, 2.0), "https://v/same": playlist(2.0)}
+    fc = FakeCloud(tmp_path, "")
+    fc.cm.fetch_text = lambda url: playlists.get(url)
+    lengths = {"short001": 2.0, "same0001": 2.02, "gone0001": 2.0, "noprobe1": None}
+    fc.cm.file_seconds = lambda trace_id: lengths[trace_id]
+    for trace_id in lengths:
+        (tmp_path / clip_name(trace_id)).write_bytes(b"mp4")
+    playlists["https://v/probe"] = playlist(2.0)
+    counts = fc.cm.refetch([("short001", "https://v/short"), ("same0001", "https://v/same"),
+                            ("gone0001", ""),  # no longer listed by the cloud
+                            ("noprobe1", "https://v/probe"),  # length of the file unknown: made again
+                            ("nofile01", "https://v/short"),  # pruned (clip limit): left alone
+                            ("../bad", "https://v/short")])
+    assert counts == {"checked": 4, "remade": 2, "unchanged": 1, "gone": 1, "failed": 0}
+    assert fc.saved == [("short001", (3, 6.0)), ("noprobe1", (1, 2.0))]
+    assert not (tmp_path / "nofile01.mp4").exists()
+
+
+def test_refetch_counts_a_failed_remux(tmp_path):
+    fc = FakeCloud(tmp_path, playlist(2.0, 2.0))
+    fc.cm.file_seconds = lambda trace_id: 2.0
+    fc.cm._remux = lambda trace_id, text: False
+    (tmp_path / "fail0001.mp4").write_bytes(b"mp4")
+    assert fc.cm.refetch([("fail0001", "https://v")])["failed"] == 1

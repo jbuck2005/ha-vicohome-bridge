@@ -34,6 +34,7 @@ OPTIONS_FILE = "/data/options.json"
 STATE_FILE = "/data/state.json"
 MEDIA_ROOT = Path("/media")
 RECENT_IN_ATTRIBUTES = 10
+REFETCH_HOURS_DEFAULT, REFETCH_HOURS_MAX = 2, 24
 # HA serves <config>/www at /local/. New-style map "homeassistant_config" mounts it at /homeassistant.
 HA_CONFIG_DIRS = (Path("/homeassistant"), Path("/config"))
 
@@ -58,6 +59,15 @@ def load_options() -> dict[str, Any]:
     except FileNotFoundError:
         pass
     return defaults
+
+
+def hours_from(payload: bytes, default: int) -> int:
+    """Hours for a clip re-fetch: a number in the payload (1-24), otherwise the default."""
+    try:
+        hours = round(float(payload.decode().strip()))
+    except (UnicodeDecodeError, ValueError, OverflowError):
+        return default
+    return min(REFETCH_HOURS_MAX, max(1, hours))
 
 
 def mqtt_settings(opts: dict[str, Any]) -> dict[str, Any]:
@@ -86,6 +96,8 @@ class Bridge:
         except ZoneInfoNotFoundError:
             self.tz = ZoneInfo("UTC")
         self.status_topic = f"{self.base}/status"
+        self.refetch_topic = f"{self.base}/clips/refetch"
+        self.refetch_hours_topic = f"{self.base}/clips/refetch_hours"
         self.stop = threading.Event()
         self.discovered: set[str] = set()
         self.device_info: dict[str, Device] = {}
@@ -94,6 +106,13 @@ class Bridge:
         self.tracker = Tracker(STATE_FILE, self.tz)
         self.api = VicohomeClient(opts["email"], opts["password"], opts["region"],
                                   opts.get("api_base_override") or "")
+        # A poll and a clip re-fetch (started from MQTT) never run at the same time.
+        self.lock = threading.Lock()
+        self.refetch_hours = REFETCH_HOURS_DEFAULT
+        self.refetching = False
+        self._refetch_hours_known = False
+        self.last_refetch: dict[str, Any] | None = None
+        self.clips: ClipMaker | None = None
         self.mqtt = self._mqtt_client()
         self._last_cleanup = 0.0
         self.clips = self._clip_maker()
@@ -124,6 +143,11 @@ class Bridge:
         client.publish(self.status_topic, "online", qos=1, retain=True)
         client.subscribe(f"{self.prefix}/status")
         client.message_callback_add(f"{self.prefix}/status", self._on_ha_status)
+        for topic, handler in ((self.refetch_topic, self._on_refetch),
+                               (f"{self.refetch_hours_topic}/set", self._on_refetch_hours),
+                               (self.refetch_hours_topic, self._on_refetch_hours)):  # retained: restores it
+            client.subscribe(topic)
+            client.message_callback_add(topic, handler)
         # Re-send discovery after a reconnect (the broker may have restarted without persistence).
         for serial in list(self.discovered):
             self._publish_discovery(serial)
@@ -216,6 +240,13 @@ class Bridge:
                 "name": "Clip limit", "icon": "mdi:arrow-expand-vertical", "unit_of_measurement": "clips",
                 "entity_category": "diagnostic", "state_topic": f"{self.base}/clips",
                 "value_template": "{{ value_json.limit }}"})
+            cfg("button", "refetch_clips", {
+                "name": "Re-fetch clips", "icon": "mdi:filmstrip-box-multiple",
+                "command_topic": self.refetch_topic, "payload_press": "PRESS"})
+            cfg("number", "refetch_hours", {
+                "name": "Re-fetch hours", "icon": "mdi:history", "entity_category": "config",
+                "command_topic": f"{self.refetch_hours_topic}/set", "state_topic": self.refetch_hours_topic,
+                "min": 1, "max": REFETCH_HOURS_MAX, "step": 1, "mode": "box", "unit_of_measurement": "h"})
         self.discovered.add(serial)
 
     def ensure_discovery(self, serial: str) -> None:
@@ -277,6 +308,57 @@ class Bridge:
         self.tracker.dirty = True
         self.publish_clip_storage()
 
+    def _on_refetch_hours(self, client, userdata, msg) -> None:
+        hours = hours_from(msg.payload, self.refetch_hours)
+        if msg.topic.endswith("/set"):
+            self.pub(self.refetch_hours_topic, str(hours))
+        self.refetch_hours = hours
+        self._refetch_hours_known = True
+
+    def publish_refetch_hours(self) -> None:
+        """Give the hours entity a value on first start (later its retained state is read back)."""
+        if self.clips and not self._refetch_hours_known:
+            self._refetch_hours_known = True
+            self.pub(self.refetch_hours_topic, str(self.refetch_hours))
+
+    def _on_refetch(self, client, userdata, msg) -> None:
+        """The "Re-fetch clips" button, or a number of hours from an automation."""
+        if not self.clips:
+            return
+        if self.refetching:
+            LOG.info("A clip re-fetch is already running")
+            return
+        self.refetching = True
+        hours = hours_from(msg.payload, self.refetch_hours)
+        threading.Thread(target=self.refetch_clips, args=(hours,), daemon=True).start()
+
+    def refetch_clips(self, hours: int) -> dict[str, int] | None:
+        """Make the saved clips of the last few hours again where the cloud now has more video."""
+        try:
+            with self.lock:
+                now = time.time()
+                start = now - hours * 3600
+                LOG.info("Re-fetching the clips of the last %d hour(s)", hours)
+                try:
+                    events = self.api.events(start, now)
+                except (VicohomeError, requests.RequestException, ValueError) as err:
+                    LOG.warning("Clip re-fetch failed: %s", err)
+                    return None
+                self.tracker.refresh(events)
+                urls = {e.trace_id: e.video_url for e in events}
+                visits = [(r["trace_id"], urls.get(r["trace_id"], ""))
+                          for r in self.tracker.newest(self.budget.cap) if r["timestamp"] >= start]
+                counts = self.clips.refetch(visits)
+                self.last_refetch = {"time": datetime.fromtimestamp(now, self.tz).isoformat(timespec="seconds"),
+                                     "hours": hours, **counts}
+                self.publish_clip_storage()
+                return counts
+        except Exception:  # a thread of its own: log the bug, keep the bridge going
+            LOG.exception("Unexpected error during the clip re-fetch")
+            return None
+        finally:
+            self.refetching = False
+
     def publish_clip_storage(self) -> None:
         if not self.clips:
             return
@@ -293,7 +375,8 @@ class Bridge:
             "full_streak": st.get("full_streak", 0), "light_streak": st.get("light_streak", 0),
             "today_visits": self.tracker.daily.get(self.tracker.day_of(time.time()), 0),
             "free_gb": round(free / 1024 ** 3, 1) if free is not None else None,
-            "last_audit": (st.get("audits") or [None])[-1], "audits": (st.get("audits") or [])[-14:]})
+            "last_audit": (st.get("audits") or [None])[-1], "audits": (st.get("audits") or [])[-14:],
+            "last_refetch": self.last_refetch})
 
     # ---- images ---------------------------------------------------------
     def _fetch_image(self, rec: dict[str, Any]) -> tuple[bytes, str] | None:
@@ -459,7 +542,9 @@ class Bridge:
         while not self.stop.is_set():
             wait = interval
             try:
-                self.poll()
+                with self.lock:
+                    self.poll()
+                self.publish_refetch_hours()  # after the first poll: the retained value has arrived by now
                 failures = 0
                 self.last_error = ""
                 self.last_ok = time.time()

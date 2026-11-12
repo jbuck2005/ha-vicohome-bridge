@@ -28,6 +28,7 @@ GIVE_UP_AFTER_S = 45 * 60
 TRUST_AFTER_S = 5 * 60  # after this, make the clip even if the playlist is still changing
 RECHECK_AFTER_S = (120, 300, 900, 1800)  # look for a longer playlist this long after saving
 PERIOD_SLACK_S = 1.5
+REFETCH_SLACK_S = 1.0  # a saved MP4 and its playlist can differ by a fraction of a second
 
 
 def playlist_ready(text: str) -> bool:
@@ -68,11 +69,12 @@ def files_to_prune(existing: list[str], keep_trace_ids: list[str]) -> list[str]:
 class ClipMaker:
     def __init__(self, folder: Path, url_prefix: str, fetch_text: Callable[[str], str | None],
                  ffmpeg: str = "ffmpeg", timeout_s: int = 180,
-                 clock: Callable[[], float] = time.time) -> None:
+                 clock: Callable[[], float] = time.time, ffprobe: str = "ffprobe") -> None:
         self.folder = folder
         self.url_prefix = url_prefix.rstrip("/")
         self.fetch_text = fetch_text
         self.ffmpeg = ffmpeg
+        self.ffprobe = ffprobe
         self.timeout_s = timeout_s
         self.clock = clock
         # trace_id -> {serial, video_url, period, attempts, since, visit, size}
@@ -178,6 +180,46 @@ class ClipMaker:
                  trace_id, job["size"][1], size[1])
         if self._remux(trace_id, text):
             job["size"] = size
+
+    def file_seconds(self, trace_id: str) -> float | None:
+        """Length of a saved MP4, or None if ffprobe can't tell."""
+        cmd = [self.ffprobe, "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
+               str(self.folder / clip_name(trace_id))]
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            return float(res.stdout.strip()) if res.returncode == 0 else None
+        except (subprocess.TimeoutExpired, OSError, ValueError):
+            return None
+
+    def refetch(self, visits: list[tuple[str, str]]) -> dict[str, int]:
+        """Make saved clips again where the cloud now has a longer video.
+
+        visits: (trace_id, video_url) for each visit to look at, with "" as the URL when the
+        cloud no longer lists it. Only clips already on disk are looked at, so the clip limit holds.
+        """
+        counts = {"checked": 0, "remade": 0, "unchanged": 0, "gone": 0, "failed": 0}
+        for trace_id, video_url in visits:
+            if not TRACE_RE.match(trace_id) or not (self.folder / clip_name(trace_id)).exists():
+                continue
+            counts["checked"] += 1
+            text = self.fetch_text(video_url) if video_url else None
+            if not text or not playlist_ready(text):
+                counts["gone"] += 1
+                continue
+            size, have = playlist_size(text), self.file_seconds(trace_id)
+            if have is not None and size[1] <= have + REFETCH_SLACK_S:
+                counts["unchanged"] += 1
+                continue
+            if not self._remux(trace_id, text):
+                counts["failed"] += 1
+                continue
+            counts["remade"] += 1
+            if trace_id in self.rechecks:
+                self.rechecks[trace_id]["size"] = size
+        LOG.info("Re-fetched clips: checked %d, re-made %d, unchanged %d, gone from the cloud %d%s",
+                 counts["checked"], counts["remade"], counts["unchanged"], counts["gone"],
+                 f", failed {counts['failed']}" if counts["failed"] else "")
+        return counts
 
     def _remux(self, trace_id: str, text: str) -> bool:
         self.folder.mkdir(parents=True, exist_ok=True)
