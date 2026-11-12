@@ -28,7 +28,7 @@ from clips import ClipBudget, ClipMaker
 from tracker import Tracker
 from vicohome import AuthError, Device, Event, VicohomeClient, VicohomeError
 
-VERSION = "0.3.4"
+VERSION = "0.3.5"
 LOG = logging.getLogger("vicohome")
 OPTIONS_FILE = "/data/options.json"
 STATE_FILE = "/data/state.json"
