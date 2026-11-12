@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+- New "Re-fetch clips" button and "Re-fetch hours" number (default 2, up to 24). The button makes
+  the saved clips of the last few hours again, under the same names, where the cloud now has a
+  longer video, for example the 2-second clips saved before 0.3.5. An automation can publish
+  a number of hours to `<base_topic>/clips/refetch` instead. The result is logged and is in the
+  `last_refetch` attribute of Clip storage.
+
 ## 0.3.5
 - Clips are no longer cut short. Since 12 November 2026 the Vicohome cloud lists a visit, with a
   playlist that looks finished, when only the first 2 seconds are uploaded, and adds the rest
@@ -10,11 +17,6 @@
 - A visit's `period` (video length) in the `last` topic and the state file follows the cloud's
   newer value instead of keeping the one from when the visit was first listed. The `event` topic
   still carries the first value.
-- New "Re-fetch clips" button and "Re-fetch hours" number (default 2, up to 24). The button makes
-  the saved clips of the last few hours again, under the same names, where the cloud now has a
-  longer video, for example the 2-second clips saved before this fix. An automation can publish
-  a number of hours to `<base_topic>/clips/refetch` instead. The result is logged and is in the
-  `last_refetch` attribute of Clip storage.
 
 ## 0.3.4
 - Logo: a wifi symbol replaces the dot on the "i" of "-bridge", as on the "i" of un-subscribird's "bird".
