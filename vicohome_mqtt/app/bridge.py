@@ -24,11 +24,11 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import paho.mqtt.client as mqtt
 import requests
 
-from clips import PERIOD_SLACK_S, TRUST_AFTER_S, ClipBudget, ClipMaker, mp4_seconds
+from clips import PERIOD_SLACK_S, TRUST_AFTER_S, ClipBudget, ClipMaker, clip_name, mp4_seconds
 from tracker import Tracker
 from vicohome import AuthError, Device, Event, VicohomeClient, VicohomeError
 
-VERSION = "0.3.6"
+VERSION = "0.4.0"
 LOG = logging.getLogger("vicohome")
 OPTIONS_FILE = "/data/options.json"
 STATE_FILE = "/data/state.json"
@@ -40,6 +40,11 @@ REPAIR_EVERY_S = 3600
 REPAIR_FIRST_AFTER_S = 120
 REPAIR_WINDOW_S = 48 * 3600
 MAX_REPAIRS = 3
+# SD-card backfill: when the cloud clip is incomplete (receivedAllSlice false) and the camera has a
+# card, pull the full recording from the card over WebRTC. Each fetch wakes the battery camera and
+# briefly signs the phone app out, so it is capped per cycle and tried a limited number of times.
+SD_MAX_PER_CYCLE = 6
+SD_MAX_TRIES = 2
 # HA serves <config>/www at /local/. New-style map "homeassistant_config" mounts it at /homeassistant.
 HA_CONFIG_DIRS = (Path("/homeassistant"), Path("/config"))
 
@@ -314,6 +319,79 @@ class Bridge:
         if missing or short:
             LOG.info("Clip repair: making %d missing and %d short clip(s) of the last %d h again",
                      missing, short, REPAIR_WINDOW_S // 3600)
+        self.sd_backfill(now, recs, fresh)
+
+    def sd_backfill(self, now: float, recs: list, fresh: dict) -> None:
+        """Pull full recordings off the camera's SD card for visits the cloud only has part of.
+
+        Runs after the cloud repair. A candidate is a kept clip that is short while the cloud marks
+        the visit incomplete (receivedAllSlice false) and the camera has a card. Capped per cycle to
+        spare the battery camera; a fetch briefly signs the phone app out (one live session per camera).
+        """
+        if self.opts.get("clip_source", "cloud_first") != "cloud_first":
+            return
+        from collections import defaultdict
+        want = defaultdict(list)   # serial -> [(trace, ts), ...]
+        for rec in recs:
+            serial, trace_id = rec["serial"], rec["trace_id"]
+            ev = fresh.get(trace_id)
+            if ev is None or ev.received_all_slice:
+                continue  # the cloud has the whole clip (or we can't tell); the cloud path handles it
+            if int(rec.get("sd_tries") or 0) >= SD_MAX_TRIES or self.clips.busy(trace_id):
+                continue
+            have = rec.get("clip_seconds")
+            if have is None and self.clips.path_for(trace_id).exists():
+                have = mp4_seconds(self.clips.path_for(trace_id))
+            if have is not None and have > (ev.period or 0) + PERIOD_SLACK_S:
+                continue  # our clip is already as long as anything; nothing to gain
+            want[serial].append((trace_id, rec["timestamp"]))
+        if not want:
+            return
+        try:
+            from sdfetch import fetch_sd_clips
+        except Exception as err:
+            LOG.warning("SD backfill unavailable (WebRTC deps missing?): %s", err)
+            return
+        iface = self._lan_ip()
+        for serial, visits in want.items():
+            batch = visits[:SD_MAX_PER_CYCLE]
+            for trace_id, _ in batch:
+                self.tracker.set_field(serial, trace_id, "sd_tries", int(
+                    next((r.get("sd_tries") for r in recs if r["trace_id"] == trace_id), 0) or 0) + 1)
+            if not self.api.sd_card_present(serial):
+                LOG.info("SD backfill: camera %s has no card; leaving %d clip(s) to the cloud", serial, len(batch))
+                continue
+            LOG.info("SD backfill: fetching %d full clip(s) from camera %s's card", len(batch), serial)
+            got = fetch_sd_clips(self.api, serial, batch, iface_ip=iface, log=LOG)
+            changed = False
+            for trace_id, data in got.items():
+                path = self.clips.path_for(trace_id)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                tmp = path.with_suffix(".sdpart")
+                tmp.write_bytes(data)
+                secs = mp4_seconds(tmp)
+                if not secs:
+                    tmp.unlink(missing_ok=True)
+                    continue
+                tmp.replace(path)
+                self.tracker.set_field(serial, trace_id, "clip_seconds", secs)
+                self.tracker.set_field(serial, trace_id, "clip_url", self.clips.url_for(trace_id))
+                LOG.info("SD backfill: %s now %.1f s from the card", trace_id, secs)
+                changed = True
+            if changed:
+                self.publish_clip_storage()
+
+    @staticmethod
+    def _lan_ip() -> str | None:
+        import socket
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect(("10.255.255.255", 1))   # no packet sent; just picks the default-route source IP
+            return s.getsockname()[0]
+        except OSError:
+            return None
+        finally:
+            s.close()
 
     def clip_audit(self, now: float) -> None:
         """Once per day, after midnight: size the clip limit from the previous complete day(s)."""

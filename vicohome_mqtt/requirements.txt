@@ -1,3 +1,7 @@
 paho-mqtt==2.2.0
 requests==2.34.2
 tzdata==2026.6
+# SD-card clip backfill (WebRTC data-channel tunnel to the camera). Installs from wheels on the
+# glibc base below; aiortc pulls av, pylibsrtp, cryptography, aioice, cffi, etc.
+aiortc==1.16.0
+websockets==17.4

@@ -32,3 +32,7 @@ your camera's name.
 ## Licence
 
 MIT, see [LICENSE](LICENSE).
+
+## Credits
+
+- WebRTC signalling for the SD-card backfill follows the MIT project [averagenative/vicolocal](https://github.com/averagenative/vicolocal); its compact-SDP codec is vendored as `vico_sdp.py`.

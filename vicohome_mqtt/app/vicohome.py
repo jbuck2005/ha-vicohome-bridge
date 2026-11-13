@@ -46,6 +46,7 @@ class Event:
     image_url: str
     keyshot_url: str
     video_url: str
+    received_all_slice: bool = True
     raw_keys: list[str] = field(default_factory=list)
 
     @property
@@ -133,6 +134,7 @@ def parse_event(raw: dict[str, Any]) -> Event | None:
         image_url=raw.get("imageUrl") or "",
         keyshot_url=keyshot_url,
         video_url=raw.get("videoUrl") or "",
+        received_all_slice=bool(raw.get("receivedAllSlice", True)),
         raw_keys=sorted(raw.keys()),
     )
 
@@ -272,6 +274,26 @@ class VicohomeClient:
         if len(items) != len(events):
             LOG.debug("Skipped %d unparseable events", len(items) - len(events))
         return events
+
+    def webrtc_ticket(self, serial: str) -> dict:
+        """Signalling ticket for a live/SD WebRTC session (what the app's getWebRTCTicket returns)."""
+        body = {"app": {"appName": "VicoHome", "appType": "Android", "bundle": "com.smartaddx.vicohome",
+                        "channelId": 1000, "tenantId": "vicoo", "version": 406000877, "versionName": "4.6.0"},
+                "countryNo": self.country, "language": "en", "serialNumber": serial,
+                "supportUnlimitedWebsocket": True, "verifyDormancyStatus": True, "verify4GVIPStatus": True,
+                "needWakeupDevice": False}
+        return self._post("/device/getWebrtcTicket", body)
+
+    def sd_card_present(self, serial: str) -> bool:
+        """True if the camera reports a microSD card (the cloud's Local tab status)."""
+        try:
+            body = self._post("/library/showLocalTab", {"serialNumber": serial})
+            for dev in ((body.get("data") or {}).get("sdDevices") or []):
+                if dev.get("serialNumber") == serial:
+                    return bool(dev.get("hasSdCard"))
+        except VicohomeError:
+            pass
+        return False
 
     def devices(self) -> list[Device]:
         body = self._post("/device/listuserdevices", {"language": "en", "countryNo": self.country})

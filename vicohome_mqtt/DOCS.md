@@ -36,6 +36,7 @@ over MQTT (with discovery). Needs the Mosquitto broker add-on and the MQTT integ
 | `retention_days` | 30 | Delete saved snapshots older than this (0 = keep forever). |
 | `motion_seconds` | 60 | How long the motion sensor stays on. |
 | `save_clips` | true | Turn each visit's clip into an MP4 in `/config/www/<clip_folder>/`, linked as `clip_url` (`/local/...`). |
+| `clip_source` | cloud_first | `cloud_first`: if a cloud clip is incomplete and the camera has a microSD card, pull the full recording off the card over WebRTC on the LAN. `cloud_only`: never use the card. |
 | `clips_to_keep` | 60 | Starting AND minimum clip limit (newest N clips kept, about 3 MB each). |
 | `clips_max` | 600 | The limit never grows past this. |
 | `clip_folder` | vicohome | Folder under `/config/www`. |
@@ -57,6 +58,15 @@ fresh link, three tries at most; so raising `clips_to_keep` brings back clips of
 Note: Home Assistant serves `/config/www` at `/local/` **without a login**. File names are the
 visit's random trace id, so they can't be guessed, but anyone given a link can open it.
 Clips are also included in Home Assistant backups (another reason only the newest N are kept).
+
+### SD-card backfill
+Battery cameras sometimes upload only the first seconds of a clip when the link is poor, but keep the whole
+recording on their microSD card. With `clip_source: cloud_first` (the default), when the cloud marks a visit
+incomplete and the camera has a card, the bridge fetches the full recording from the card over a WebRTC
+data-channel link on the local network (the same path the app uses) and replaces the short clip. Each fetch
+wakes the camera and briefly signs the phone app out (a camera serves one live session at a time), so it runs
+only for incomplete clips, a few per hour at most. Set `clip_source: cloud_only` to turn it off. The add-on
+runs on the host network for the peer-to-peer link, so the Home Assistant host must be on the camera's LAN.
 
 ### Self-sizing clip limit (daily audit)
 Just after local midnight the bridge audits the previous day (only days it saw completely):

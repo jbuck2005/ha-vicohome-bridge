@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.0
+- Clips the cloud only has part of are backfilled from the camera's microSD card. When a visit's
+  cloud video is incomplete (the cloud reports `receivedAllSlice` false) and the camera has a card,
+  the bridge pulls the full recording straight off the card over a WebRTC data-channel tunnel on the
+  local network, the same path the Vicohome app uses, and replaces the short clip. This recovers
+  clips the camera uploaded short because of a poor link. New option `clip_source`: `cloud_first`
+  (default) does this backfill; `cloud_only` never touches the card.
+- A card fetch wakes the battery camera and briefly signs the phone app out of the account (a camera
+  serves one live session at a time), so it only runs for genuinely incomplete clips, at most a few
+  per hourly repair, and at most twice per visit.
+- The add-on now uses a glibc base image so the WebRTC libraries install from prebuilt wheels instead
+  of compiling on the Home Assistant host, and runs on the host network (needed for the peer-to-peer
+  link to the camera).
+- WebRTC signalling follows the MIT project averagenative/vicolocal; its compact-SDP codec is vendored.
+
 ## 0.3.6
 - Clips cut short are made again. Once an hour (first 2 minutes after a start) the bridge lists
   the last two days of visits again, compares each kept clip's length with the cloud's video
