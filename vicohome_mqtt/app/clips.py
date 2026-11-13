@@ -7,6 +7,8 @@ which HA serves at /local/... . Only the newest N clips are kept.
 The cloud can list a visit, with a finished-looking playlist, before the whole video is uploaded,
 and add segments later. So a clip is only made once its playlist stops growing, and is checked
 again a few times afterwards; if the playlist grew, the file is made again under the same name.
+Clips that were still cut short (made by an older version, or before the cloud had the whole
+video) can be made again later with remake(): the bridge asks for that once an hour.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import struct
 import subprocess
 import tempfile
 import time
@@ -54,6 +57,50 @@ def grew(new: tuple[int, float], old: tuple[int, float] | None) -> bool:
     return old is not None and (new[0] > old[0] or new[1] > old[1] + 0.5)
 
 
+def _boxes(fh, start: int, end: int):
+    """(type, body start, box end) of the MP4 boxes between start and end."""
+    pos = start
+    while pos + 8 <= end:
+        fh.seek(pos)
+        head = fh.read(8)
+        if len(head) < 8:
+            return
+        size, kind = struct.unpack(">I4s", head)
+        body = pos + 8
+        if size == 1:  # 64-bit size
+            size = struct.unpack(">Q", fh.read(8))[0]
+            body = pos + 16
+        elif size == 0:  # to the end of the file
+            size = end - pos
+        if size < body - pos:
+            return
+        yield kind, body, pos + size
+        pos += size
+
+
+def mp4_seconds(path: Path) -> float | None:
+    """Length of an MP4 from its movie header, or None if the file isn't one. No ffprobe needed."""
+    try:
+        with open(path, "rb") as fh:
+            end = fh.seek(0, 2)
+            for kind, body, box_end in _boxes(fh, 0, end):
+                if kind != b"moov":
+                    continue
+                for kind2, body2, box_end2 in _boxes(fh, body, box_end):
+                    if kind2 != b"mvhd":
+                        continue
+                    fh.seek(body2)
+                    mvhd = fh.read(box_end2 - body2)
+                    if mvhd[0] == 1:  # version 1: 64-bit times
+                        scale, length = struct.unpack(">IQ", mvhd[20:32])
+                    else:
+                        scale, length = struct.unpack(">II", mvhd[12:20])
+                    return round(length / scale, 2) if scale else None
+    except (OSError, struct.error, IndexError):
+        pass
+    return None
+
+
 def clip_name(trace_id: str) -> str:
     if not TRACE_RE.match(trace_id):
         raise ValueError("unexpected trace id")
@@ -75,14 +122,21 @@ class ClipMaker:
         self.ffmpeg = ffmpeg
         self.timeout_s = timeout_s
         self.clock = clock
-        # trace_id -> {serial, video_url, period, attempts, since, visit, size}
+        # trace_id -> {serial, video_url, period, attempts, since, visit, size, remake, have}
         self.pending: dict[str, dict] = {}
         # Clips already saved that may still grow: trace_id -> {serial, video_url, period, size, saved, checks, due}
         self.rechecks: dict[str, dict] = {}
         self.failed: set[str] = set()  # gave up; not retried until the add-on restarts
+        self.saved: dict[str, tuple[str, float]] = {}  # trace_id -> (serial, seconds) of files written; the bridge empties it
 
     def url_for(self, trace_id: str) -> str:
         return f"{self.url_prefix}/{clip_name(trace_id)}"
+
+    def path_for(self, trace_id: str) -> Path:
+        return self.folder / clip_name(trace_id)
+
+    def busy(self, trace_id: str) -> bool:
+        return trace_id in self.pending or trace_id in self.rechecks
 
     def queue(self, serial: str, trace_id: str, video_url: str, period: float | None = None,
               visit_ts: float | None = None) -> str | None:
@@ -95,8 +149,24 @@ class ClipMaker:
             now = self.clock()
             self.pending[trace_id] = {"serial": serial, "video_url": video_url, "period": period,
                                       "attempts": 0, "since": now, "visit": min(visit_ts or now, now),
-                                      "size": None}
+                                      "size": None, "remake": False, "have": None}
         return None
+
+    def remake(self, serial: str, trace_id: str, video_url: str, period: float | None,
+               visit_ts: float | None, have_s: float | None) -> bool:
+        """Make a clip again from a fresh cloud link, because it is missing or shorter than the cloud's video.
+
+        have_s is the length of the file we have (None if it is missing): the clip is only written
+        when the cloud's playlist is longer than that. These jobs run after the live ones and are
+        dropped, not blacklisted, when the cloud never offers more.
+        """
+        if not TRACE_RE.match(trace_id) or not video_url or self.busy(trace_id):
+            return False
+        now = self.clock()
+        self.pending[trace_id] = {"serial": serial, "video_url": video_url, "period": period,
+                                  "attempts": 0, "since": now, "visit": min(visit_ts or now, now),
+                                  "size": None, "remake": True, "have": have_s}
+        return True
 
     def update(self, trace_id: str, video_url: str, period: float | None) -> None:
         """Newer details of a visit from the cloud: its video may have grown since it was queued."""
@@ -120,15 +190,17 @@ class ClipMaker:
         A clip made again because the cloud's video grew keeps its URL, so it is not returned.
         """
         made, start = [], self.clock()
-        for trace_id, job in sorted(self.pending.items(), key=lambda kv: kv[1]["since"]):
+        for trace_id, job in sorted(self.pending.items(), key=lambda kv: (kv[1]["remake"], kv[1]["since"])):
             if self.clock() - start > budget_s:
                 break
             job["attempts"] += 1
             ok = self._make(trace_id, job)
-            if ok:
+            if ok and job["have"] is None:
                 made.append((job["serial"], trace_id, self.url_for(trace_id)))
             if ok or job["attempts"] >= MAX_ATTEMPTS or self.clock() - job["since"] > GIVE_UP_AFTER_S:
-                if not ok:
+                if not ok and job["remake"]:
+                    LOG.info("The cloud offered nothing longer for clip %s; leaving it for now", trace_id)
+                elif not ok:
                     LOG.warning("Gave up on the clip for %s after %d tries", trace_id, job["attempts"])
                     self.failed.add(trace_id)
                 del self.pending[trace_id]
@@ -146,6 +218,9 @@ class ClipMaker:
             return False
         size, last = playlist_size(text), job["size"]
         job["size"] = size
+        if job["have"] is not None and size[1] <= job["have"] + 0.5:
+            LOG.debug("Clip %s: the cloud's playlist (%.1f s) is no longer than our file", trace_id, size[1])
+            return False
         if self.clock() - job["visit"] < TRUST_AFTER_S:
             # Wait until two fetches a poll apart agree and the playlist is as long as the visit.
             if last is None or size != last or self._short_of_period(job):
@@ -154,9 +229,11 @@ class ClipMaker:
         if not self._remux(trace_id, text):
             return False
         now = self.clock()
-        self.rechecks[trace_id] = {"serial": job["serial"], "video_url": job["video_url"],
-                                   "period": job.get("period"), "size": size, "saved": now,
-                                   "checks": 0, "due": now + RECHECK_AFTER_S[0]}
+        self.saved[trace_id] = (job["serial"], size[1])
+        if now - job["visit"] <= GIVE_UP_AFTER_S:  # a fresh visit's video may still grow
+            self.rechecks[trace_id] = {"serial": job["serial"], "video_url": job["video_url"],
+                                       "period": job.get("period"), "size": size, "saved": now,
+                                       "checks": 0, "due": now + RECHECK_AFTER_S[0]}
         return True
 
     def _recheck(self, trace_id: str, job: dict) -> None:
@@ -178,6 +255,7 @@ class ClipMaker:
                  trace_id, job["size"][1], size[1])
         if self._remux(trace_id, text):
             job["size"] = size
+            self.saved[trace_id] = (job["serial"], size[1])
 
     def _remux(self, trace_id: str, text: str) -> bool:
         self.folder.mkdir(parents=True, exist_ok=True)

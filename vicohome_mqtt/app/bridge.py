@@ -24,16 +24,22 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import paho.mqtt.client as mqtt
 import requests
 
-from clips import ClipBudget, ClipMaker
+from clips import PERIOD_SLACK_S, TRUST_AFTER_S, ClipBudget, ClipMaker, mp4_seconds
 from tracker import Tracker
 from vicohome import AuthError, Device, Event, VicohomeClient, VicohomeError
 
-VERSION = "0.3.5"
+VERSION = "0.3.6"
 LOG = logging.getLogger("vicohome")
 OPTIONS_FILE = "/data/options.json"
 STATE_FILE = "/data/state.json"
 MEDIA_ROOT = Path("/media")
 RECENT_IN_ATTRIBUTES = 10
+# Clip repair: how often the kept visits of the last REPAIR_WINDOW_S are checked against the cloud,
+# how soon after a start, and how many times one clip is made again before it is left alone.
+REPAIR_EVERY_S = 3600
+REPAIR_FIRST_AFTER_S = 120
+REPAIR_WINDOW_S = 48 * 3600
+MAX_REPAIRS = 3
 # HA serves <config>/www at /local/. New-style map "homeassistant_config" mounts it at /homeassistant.
 HA_CONFIG_DIRS = (Path("/homeassistant"), Path("/config"))
 
@@ -100,6 +106,7 @@ class Bridge:
         self.budget = ClipBudget(self.tracker.clip_budget, int(self.opts["clips_to_keep"]),
                                  int(self.opts["clips_max"]))
         self._last_save = 0.0
+        self._next_repair = time.time() + REPAIR_FIRST_AFTER_S
 
     # ---- MQTT -----------------------------------------------------------
     def _mqtt_client(self) -> mqtt.Client:
@@ -241,6 +248,10 @@ class Bridge:
         for serial, trace_id, url in self.clips.process():
             self.tracker.set_field(serial, trace_id, "clip_url", url)
             changed.add(serial)
+        for trace_id, (serial, seconds) in self.clips.saved.items():
+            self.tracker.set_field(serial, trace_id, "clip_seconds", seconds)
+            changed.add(serial)
+        self.clips.saved.clear()
         keep = [r["trace_id"] for r in self.tracker.newest(self.budget.cap)]
         removed = self.clips.prune(keep)
         if removed:
@@ -256,6 +267,53 @@ class Bridge:
                 self.publish_camera_state(serial, now)
         if changed or removed:
             self.publish_clip_storage()
+
+    def repair_clips(self, now: float) -> None:
+        """Once an hour: the kept visits of the last two days get whole clips.
+
+        A clip can be short because an older bridge saved the first seconds the cloud offered,
+        or because the cloud only had part of the video within the rechecks; and a visit can
+        have no file at all after the clip limit was raised. The cloud's links are signed and
+        expire, so those visits are listed again for fresh ones, and a clip is only made again
+        when the cloud's video is longer than the file.
+        """
+        if not self.clips or now < self._next_repair:
+            return
+        self._next_repair = now + REPAIR_EVERY_S
+        recs = [r for r in self.tracker.newest(self.budget.cap)
+                if now - REPAIR_WINDOW_S <= r["timestamp"] <= now - TRUST_AFTER_S
+                and int(r.get("clip_repairs") or 0) < MAX_REPAIRS and not self.clips.busy(r["trace_id"])]
+        if not recs:
+            return
+        events = self.api.events(min(r["timestamp"] for r in recs) - 60, now)
+        self.tracker.refresh(events)
+        fresh = {e.trace_id: e for e in events}
+        missing = short = 0
+        for rec in recs:
+            serial, trace_id = rec["serial"], rec["trace_id"]
+            ev = fresh.get(trace_id)
+            have = None
+            if self.clips.path_for(trace_id).exists():
+                have = rec.get("clip_seconds")
+                if have is None:
+                    have = mp4_seconds(self.clips.path_for(trace_id))
+                    if have is None:
+                        continue  # not a readable MP4; leave it alone
+                    self.tracker.set_field(serial, trace_id, "clip_seconds", have)
+                period = ev.period if ev and ev.period else rec.get("period")
+                if not period or period <= have + PERIOD_SLACK_S:
+                    continue
+            if not ev or not ev.video_url:
+                continue  # the cloud no longer lists it, so there is nothing to fetch
+            if self.clips.remake(serial, trace_id, ev.video_url, ev.period, rec["timestamp"], have):
+                self.tracker.set_field(serial, trace_id, "clip_repairs", int(rec.get("clip_repairs") or 0) + 1)
+                if have is None:
+                    missing += 1
+                else:
+                    short += 1
+        if missing or short:
+            LOG.info("Clip repair: making %d missing and %d short clip(s) of the last %d h again",
+                     missing, short, REPAIR_WINDOW_S // 3600)
 
     def clip_audit(self, now: float) -> None:
         """Once per day, after midnight: size the clip limit from the previous complete day(s)."""
@@ -437,6 +495,7 @@ class Bridge:
             self.ensure_discovery(serial)
             self.publish_camera_state(serial, now)
 
+        self.repair_clips(now)
         self.handle_clips()
         self.clip_audit(now)
         self.tracker.last_poll = now

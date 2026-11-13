@@ -5,7 +5,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "vicohome_mqtt" / "app"))
 
-from clips import ClipMaker, clip_name, files_to_prune, playlist_ready, playlist_size  # noqa: E402
+from clips import ClipMaker, clip_name, files_to_prune, mp4_seconds, playlist_ready, playlist_size  # noqa: E402
 
 COMPLETE = "#EXTM3U\n#EXT-X-VERSION:3\n#EXTINF:2.0,\nhttps://x/a.ts?sig=1\n#EXT-X-ENDLIST\n"
 
@@ -140,6 +140,60 @@ def test_recheck_stops_when_the_clip_was_pruned(tmp_path):
     fc.text = playlist(2.0, 2.0)
     fc.poll(200)
     assert fc.saved == [("gone0001", (1, 2.0))] and not fc.cm.rechecks
+
+
+def test_remade_clip_keeps_its_url_and_reports_its_length(tmp_path):
+    fc = FakeCloud(tmp_path, playlist(2.0))
+    (tmp_path / "shrt0001.mp4").write_bytes(b"old")
+    assert fc.cm.remake("cam", "shrt0001", "https://fresh", 20.0, fc.now - 7200, have_s=2.0)
+    assert fc.poll(0) == [] and fc.saved == []  # the cloud still offers only 2 s: nothing written
+    fc.text = playlist(*[2.0] * 10)
+    assert fc.poll() == []  # made again under the same name, so not reported as a new clip
+    assert fc.saved == [("shrt0001", (10, 20.0))]
+    assert fc.cm.saved == {"shrt0001": ("cam", 20.0)}
+    assert not fc.cm.rechecks and not fc.cm.pending  # an old visit: no rechecks afterwards
+
+
+def test_remake_of_a_missing_clip_is_reported_like_a_new_one(tmp_path):
+    fc = FakeCloud(tmp_path, playlist(2.0, 2.0))
+    assert fc.cm.remake("cam", "gone0002", "https://fresh", 4.0, fc.now - 7200, have_s=None)
+    assert fc.poll(0) == [("cam", "gone0002", "/local/v/gone0002.mp4")]
+
+
+def test_remake_runs_after_live_clips_and_is_dropped_without_blacklisting(tmp_path):
+    fc = FakeCloud(tmp_path, playlist(2.0))
+    (tmp_path / "shrt0002.mp4").write_bytes(b"old")
+    fc.cm.remake("cam", "shrt0002", "https://fresh", 20.0, fc.now - 7200, have_s=2.0)
+    fc.now += 10
+    fc.cm.queue("cam", "live0001", "https://v", period=2.0, visit_ts=fc.now - 3600)
+    assert fc.cm.remake("cam", "shrt0002", "https://again", 20.0, fc.now - 7200, 2.0) is False  # already queued
+    fc.poll(0)
+    assert fc.saved == [("live0001", (1, 2.0))]  # the live one went first
+    for _ in range(9):
+        fc.poll()
+    assert "shrt0002" not in fc.cm.pending and "shrt0002" not in fc.cm.failed
+
+
+def mp4(version=0, scale=1000, length=2040):
+    import struct
+
+    def box(kind, body):
+        return struct.pack(">I4s", 8 + len(body), kind) + body
+    if version:
+        mvhd = bytes([1, 0, 0, 0]) + b"\0" * 16 + struct.pack(">IQ", scale, length) + b"\0" * 80
+    else:
+        mvhd = bytes([0, 0, 0, 0]) + b"\0" * 8 + struct.pack(">II", scale, length) + b"\0" * 80
+    return box(b"ftyp", b"isom\0\0\0\0isom") + box(b"moov", box(b"mvhd", mvhd) + box(b"trak", b"\0" * 20)) + box(b"mdat", b"\0" * 100)
+
+
+def test_mp4_seconds_reads_the_movie_header(tmp_path):
+    (tmp_path / "a.mp4").write_bytes(mp4())
+    assert mp4_seconds(tmp_path / "a.mp4") == 2.04
+    (tmp_path / "b.mp4").write_bytes(mp4(version=1, scale=90000, length=1800000))
+    assert mp4_seconds(tmp_path / "b.mp4") == 20.0
+    (tmp_path / "c.mp4").write_bytes(b"not a movie at all")
+    assert mp4_seconds(tmp_path / "c.mp4") is None
+    assert mp4_seconds(tmp_path / "missing.mp4") is None
 
 
 from clips import ClipBudget  # noqa: E402

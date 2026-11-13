@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.6
+- Clips cut short are made again. Once an hour (first 2 minutes after a start) the bridge lists
+  the last two days of visits again, compares each kept clip's length with the cloud's video
+  length, and makes the MP4 again from a fresh link when the cloud has more, under the same name.
+  This repairs clips saved by 0.3.4 and earlier, and clips whose video the cloud finished after
+  the 0.3.5 rechecks. A kept visit with no file (after `clips_to_keep` was raised, say) gets one
+  too. A clip the cloud never offers more for is tried 3 times, then left alone. The clip's
+  length is kept in the state file as `clip_seconds`.
+- Clips made for a visit older than 45 minutes are not rechecked afterwards.
+
 ## 0.3.5
 - Clips are no longer cut short. Since 12 November 2026 the Vicohome cloud lists a visit, with a
   playlist that looks finished, when only the first 2 seconds are uploaded, and adds the rest

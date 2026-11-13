@@ -51,7 +51,9 @@ remuxes each clip with ffmpeg (no re-encoding) into an MP4 and sets `clip_url` o
 The cloud can list a visit before its whole video is uploaded, so the bridge waits until the
 playlist is the same on two polls in a row (at most 5 minutes after the visit), then checks it
 again 2, 5, 15 and 30 minutes later. If it grew, the MP4 is made again under the same name and
-`clip_url` stays the same.
+`clip_url` stays the same. Once an hour the bridge also lists the last two days of visits again
+and makes any kept clip that is still shorter than the cloud's video (or missing) again from a
+fresh link, three tries at most; so raising `clips_to_keep` brings back clips of recent visits.
 Note: Home Assistant serves `/config/www` at `/local/` **without a login**. File names are the
 visit's random trace id, so they can't be guessed, but anyone given a link can open it.
 Clips are also included in Home Assistant backups (another reason only the newest N are kept).
