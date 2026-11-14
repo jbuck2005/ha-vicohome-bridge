@@ -11,6 +11,19 @@ How versions move (since 0.4.1):
   offers an update after each merge, so new work can be tried before it is released.
 - A release promotes `edge` into `main`: the version loses its `-dev.N` suffix and the changelog's pending notes
   are renamed to the version. The add-on store (and HA's update button) then offers the new release.
+- Merging the release into `main` drafts a GitHub Release for `v<version>` with that version's changelog notes
+  (`.github/workflows/release.yml`). Nothing is published automatically: the maintainer reviews the draft and
+  presses **Publish**, which creates the tag.
+- At most one tagged release a day (UTC). If a `v*` tag was already made that day, the draft says when it may be
+  published, and a tag pushed by hand on the same day fails the Release workflow.
+
+Releasing, step by step:
+
+1. Open a PR from `edge` into `main` that sets the plain version (`0.4.2`) in `vicohome_mqtt/config.yaml` and
+   `VERSION` in `bridge.py`, renames `## Unreleased` in the changelog to it, and adds a section here.
+2. Merge it. The Release workflow drafts `v0.4.2`.
+3. Check the draft under Releases and publish it (on another day if it says to hold).
+4. On `edge`, the next change starts the following edge build (`0.4.3-dev.1`).
 
 ---
 
@@ -70,5 +83,5 @@ full list (0.1.0 through 0.3.2).
 
 ---
 
-Note: releases 0.3.3–0.3.5 are tagged on GitHub; 0.3.6, 0.4.0 and 0.4.1 were tagged when this release log was
-added. Releases before 0.3.3 were not tagged.
+Note: releases 0.3.3–0.3.5 are tagged on GitHub; 0.3.6 and 0.4.0 were tagged when this release log was added,
+and 0.4.1 is still to be tagged. Releases before 0.3.3 were not tagged.

@@ -1,0 +1,129 @@
+name: Release
+
+# Releases are drafted here and published by hand. Nothing in this file publishes a release.
+#
+# - A push to `main` that changes the add-on version (a release PR from `edge`) drafts a GitHub
+#   Release for `v<version>`, with that version's notes from the changelog. The tag is only created
+#   when the maintainer presses Publish on the draft.
+# - At most one release a day (UTC). If a `v*` tag was already made today, the draft still appears,
+#   but its notes start with a warning and the run shows the date it may be published.
+# - Pushing a `v*` tag by hand runs the same daily check and fails if another `v*` tag was made the
+#   same day, so a second release in a day shows up as a red run.
+
+on:
+  push:
+    branches: [main]
+    paths: [vicohome_mqtt/config.yaml]
+    tags: ["v*"]
+  workflow_dispatch:  # draft (or refresh the draft of) the version now on main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  draft:
+    name: Draft release
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # create and edit draft releases
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0  # all tags, for the daily check
+
+      - name: Read the add-on version
+        id: version
+        run: |
+          version=$(sed -n 's/^version: "\(.*\)"/\1/p' vicohome_mqtt/config.yaml)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error file=vicohome_mqtt/config.yaml::main has $version; a release needs a plain x.y.z version"
+            exit 1
+          fi
+          if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
+            echo "::notice::v$version is already tagged; nothing to draft"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Collect the changelog notes
+        if: steps.version.outputs.skip != 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # The lines under "## <version>" up to the next "## " heading.
+          awk -v want="## $VERSION" '
+            $0 == want { on = 1; next }
+            on && /^## / { exit }
+            on { print }
+          ' vicohome_mqtt/CHANGELOG.md > notes.md
+          if ! grep -q '[^[:space:]]' notes.md; then
+            echo "::error file=vicohome_mqtt/CHANGELOG.md::No notes under '## $VERSION'"
+            exit 1
+          fi
+          printf '\nThe story behind this release is in [RELEASES.md](https://github.com/%s/blob/main/RELEASES.md).\n' \
+            "$GITHUB_REPOSITORY" >> notes.md
+
+      - name: One release a day
+        id: daily
+        if: steps.version.outputs.skip != 'true'
+        run: |
+          today=$(date -u +%F)
+          tagged=$(TZ=UTC git for-each-ref 'refs/tags/v*' --format='%(refname:short) %(creatordate:format-local:%F)' \
+                   | awk -v d="$today" '$2 == d { print $1 }' | paste -sd ' ' -)
+          if [ -n "$tagged" ]; then
+            tomorrow=$(date -u -d tomorrow +%F)
+            echo "::warning::Already tagged today ($today UTC): $tagged. Publish this draft on or after $tomorrow."
+            { printf '> [!WARNING]\n> Hold until %s (UTC): %s was already tagged today. Delete this note when publishing.\n\n' \
+                "$tomorrow" "$tagged"; cat notes.md; } > notes.tmp && mv notes.tmp notes.md
+            echo "hold=$tomorrow" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create or update the draft
+        if: steps.version.outputs.skip != 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          HOLD: ${{ steps.daily.outputs.hold }}
+        run: |
+          tag="v$VERSION"
+          # Drafts have no tag yet, so look them up by name in the release list.
+          existing=$(gh release list --limit 100 --json tagName,isDraft \
+                     --jq ".[] | select(.isDraft and .tagName == \"$tag\") | .tagName")
+          if [ -n "$existing" ]; then
+            gh release edit "$tag" --draft --target "$GITHUB_SHA" --title "$VERSION" --notes-file notes.md
+            echo "Updated the draft for $tag" >> "$GITHUB_STEP_SUMMARY"
+          else
+            gh release create "$tag" --draft --target "$GITHUB_SHA" --title "$VERSION" --notes-file notes.md
+            echo "Drafted $tag" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ -n "$HOLD" ]; then
+            echo "Hold: another release was tagged today. Publish on or after $HOLD (UTC)." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "Review and publish it under Releases; publishing creates the tag." >> "$GITHUB_STEP_SUMMARY"
+
+  tag-check:
+    name: One tagged release a day
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: No other v* tag made the same day
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          day=$(TZ=UTC git for-each-ref "refs/tags/$TAG" --format='%(creatordate:format-local:%F)')
+          others=$(TZ=UTC git for-each-ref 'refs/tags/v*' --format='%(refname:short) %(creatordate:format-local:%F)' \
+                   | awk -v d="$day" -v me="$TAG" '$2 == d && $1 != me { print $1 }' | paste -sd ' ' -)
+          if [ -n "$others" ]; then
+            echo "::error::$TAG is a second tagged release on $day (UTC), after: $others. The limit is one a day."
+            exit 1
+          fi
+          echo "$TAG is the only tagged release on $day (UTC)."
