@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.1
+- A **Re-fetch clips** button and a **Re-fetch hours** number (default 2, up to 24) as Home Assistant
+  entities. Pressing the button, or publishing a number of hours to `<base_topic>/clips/refetch`,
+  re-lists the visits of that many hours, compares each saved clip with the cloud's current video and
+  makes the file again, under the same name, where the cloud now has more. Only clips still on disk are
+  touched, so the clip limit holds. The counts (checked, re-made, unchanged, gone from the cloud) are
+  logged and published as `last_refetch` on the Clip storage entity. This is the on-demand companion to
+  the hourly repair added in 0.3.6.
+- An **edge channel**: changes now merge into the `edge` branch first and reach `main` as a release.
+  Home Assistant can install the edge add-on alongside the released one from
+  `https://github.com/jbuck2005/ha-vicohome-bridge#edge`; it carries a `-dev.N` version and offers an
+  update after each merge. See the README.
+
 ## 0.4.0
 - Clips the cloud only has part of are backfilled from the camera's microSD card. When a visit's
   cloud video is incomplete (the cloud reports `receivedAllSlice` false) and the camera has a card,
@@ -35,12 +48,6 @@
 - A visit's `period` (video length) in the `last` topic and the state file follows the cloud's
   newer value instead of keeping the one from when the visit was first listed. The `event` topic
   still carries the first value.
-- New "Re-fetch clips" button and "Re-fetch hours" number (default 2, up to 24). The button makes
-  the saved clips of the last few hours again, under the same names, where the cloud now has a
-  longer video, for example the 2-second clips saved before this fix. An automation can publish
-  a number of hours to `<base_topic>/clips/refetch` instead. The result is logged and is in the
-  `last_refetch` attribute of Clip storage.
-
 ## 0.3.4
 - Logo: a wifi symbol replaces the dot on the "i" of "-bridge", as on the "i" of un-subscribird's "bird".
 

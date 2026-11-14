@@ -1,5 +1,5 @@
 name: "Vicohome MQTT Bridge"
-version: "0.4.0"
+version: "0.4.1"
 slug: "vicohome_mqtt"
 host_network: true
 description: "Vicohome bird-feeder cameras in Home Assistant over MQTT: newest bird, snapshot image, visit events, battery and Wi-Fi."
