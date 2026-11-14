@@ -5,6 +5,24 @@ between sessions. It is never merged into `main` or `edge`.
 
 ---
 
+## 2026-11-14: SD backfill could give one recording to two visits (PR #22)
+
+**What I checked.** I was worried the SD card path was double counting. It wasn't, in the cases I saw: every
+clip on the station is unique, and those visits came from the cloud.
+
+**What I found anyway.** `sdfetch._run` gave a matched SD recording to every visit that fell inside it. Two visits
+inside one long recording would both get the same file.
+
+**What I changed** (PR #22, `dev/sd-one-clip-per-visit`, edge 0.4.2-dev.2):
+- `assign_segments()` gives each recording to the visit that started closest to it. The others keep their cloud
+  clip, and the log says how many were left out.
+- `pytest tests`: 66 passed.
+
+**Next.** Merge into edge. If #21 (sd_poll) goes in first, rebase this one and bump to the next dev number.
+`_sd_known` in #21 already skips recordings that a cloud visit covers, so cloud plus SD poll doesn't double up.
+
+---
+
 ## 2026-11-14: Daily release check fixed for lightweight tags
 
 **What I found.** My Zeus review spotted that PR #20's one-a-day check read tag creation dates. When I
