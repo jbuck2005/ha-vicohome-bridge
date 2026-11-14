@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+- Clearer clip log lines. A new visit's clip is saved a poll or two after its event line, so in the log it
+  often sits under the next visit's lines and looked like it belonged to that one. `Saved clip` now names
+  the visit it is for (`... for the visit at 09:04:00`), and `Removed old clip(s)` says how many clips are
+  kept, which shows it is the clip limit dropping the oldest file, not the new visit's clip.
+
 ## 0.4.1
 - A **Re-fetch clips** button and a **Re-fetch hours** number (default 2, up to 24) as Home Assistant
   entities. Pressing the button, or publishing a number of hours to `<base_topic>/clips/refetch`,

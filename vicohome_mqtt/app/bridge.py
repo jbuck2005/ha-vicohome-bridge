@@ -28,7 +28,7 @@ from clips import PERIOD_SLACK_S, TRUST_AFTER_S, ClipBudget, ClipMaker, clip_nam
 from tracker import Tracker
 from vicohome import AuthError, Device, Event, VicohomeClient, VicohomeError
 
-VERSION = "0.4.1"
+VERSION = "0.4.2-dev.1"
 LOG = logging.getLogger("vicohome")
 OPTIONS_FILE = "/data/options.json"
 STATE_FILE = "/data/state.json"
@@ -298,7 +298,7 @@ class Bridge:
         keep = [r["trace_id"] for r in self.tracker.newest(self.budget.cap)]
         removed = self.clips.prune(keep)
         if removed:
-            LOG.info("Removed %d old clip(s)", removed)
+            LOG.info("Removed %d old clip(s) to keep the newest %d", removed, len(keep))
             keep_set = set(keep)
             for cam in self.tracker.cameras.values():
                 for rec in cam.get("history", []):
