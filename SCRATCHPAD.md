@@ -5,6 +5,27 @@ between sessions. It is never merged into `main` or `edge`.
 
 ---
 
+## 2026-11-14: Daily release check fixed for lightweight tags
+
+**What I found.** My Zeus review spotted that PR #20's one-a-day check read tag creation dates. When I
+press Publish, GitHub makes a lightweight tag, and git dates that by its commit, which can be days older
+than the release. The check could miss a second release on the same day, or hold one that was fine.
+
+**What I changed** (PR #20, `dev/draft-releases`):
+- A release's day now comes from its publish time in GitHub's release list, or an annotated tag's
+  tagger date, counted in `RELEASE_TZ`. The logic is in `.github/scripts/release_day.py`, with tests in
+  `tests/test_release_day.py`, including the lightweight-tag case.
+- The check also runs when I publish a release, not only on a tag push.
+- `pytest tests`: 61 passed.
+
+**Status.** Pushed to PR #20, waiting on CI. `main` and `edge` still show as unprotected on GitHub.
+
+**Next.**
+- Set `RELEASE_TZ` to `America/Toronto`, then merge #20 into `edge`.
+- Turn on the ruleset for `main` and `edge`.
+
+---
+
 ## 2026-11-14: Local checkout on my PC checked
 
 **What I found**
