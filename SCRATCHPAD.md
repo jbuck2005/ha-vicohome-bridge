@@ -21,9 +21,8 @@ Dependabot targets `edge`. Releases were drafted and published by hand, and noth
 - Release steps written out in `RELEASES.md`, and its note about which versions are tagged corrected.
 - `pytest tests`: 53 passed.
 
-**Status.** Committed. The push is still refused (403): the Claude GitHub App doesn't cover this repo yet.
+**Status.** In review as PR #20 into `edge`.
 
 **Next.**
-- Add this repo to the Claude GitHub App, then push `dev/draft-releases` and open the PR into `edge`.
 - Set the `RELEASE_TZ` repository variable to `America/Toronto`.
 - Tag 0.4.1 on another day: v0.3.6 and v0.4.0 were both tagged today.
