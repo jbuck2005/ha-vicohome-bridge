@@ -6,16 +6,22 @@ name: Release
 #   Release for `v<version>`, with that version's notes from the changelog. The tag is only created
 #   when the maintainer presses Publish on the draft.
 # - At most one release a day, counted in the time zone of the `RELEASE_TZ` repository variable
-#   (an IANA name such as America/Toronto; UTC when unset). If a `v*` tag was already made today,
-#   the draft still appears, but its notes start with a warning and the run shows the date it may be published.
-# - Pushing a `v*` tag by hand runs the same daily check and fails if another `v*` tag was made the
-#   same day, so a second release in a day shows up as a red run.
+#   (an IANA name such as America/Toronto; UTC when unset). If a release was already made today,
+#   the draft still appears, but its notes start with a warning and the run shows the date it may be
+#   published.
+# - Publishing a release, or pushing a `v*` tag by hand, runs the same daily check and fails if
+#   another release was made the same day, so a second release in a day shows up as a red run.
+# - A release's day is its publish time from GitHub's release list (or an annotated tag's tagger
+#   date), never the tag's git date: the lightweight tag GitHub makes on Publish carries the commit's
+#   date. See .github/scripts/release_day.py.
 
 on:
   push:
     branches: [main]
     paths: [vicohome_mqtt/config.yaml]
     tags: ["v*"]
+  release:
+    types: [published]
   workflow_dispatch:  # draft (or refresh the draft of) the version now on main
 
 permissions:
@@ -78,15 +84,16 @@ jobs:
         id: daily
         if: steps.version.outputs.skip != 'true'
         run: |
-          export TZ="$RELEASE_TZ"
-          today=$(date +%F)
-          tagged=$(git for-each-ref 'refs/tags/v*' --format='%(refname:short) %(creatordate:format-local:%F)' \
-                   | awk -v d="$today" '$2 == d { print $1 }' | paste -sd ' ' -)
-          if [ -n "$tagged" ]; then
-            tomorrow=$(date -d tomorrow +%F)
-            echo "::warning::Already tagged today ($today, $TZ): $tagged. Publish this draft on or after $tomorrow."
-            { printf '> [!WARNING]\n> Hold until %s (%s): %s was already tagged today. Delete this note when publishing.\n\n' \
-                "$tomorrow" "$TZ" "$tagged"; cat notes.md; } > notes.tmp && mv notes.tmp notes.md
+          gh release list --limit 100 --json tagName,publishedAt,isDraft > "$RUNNER_TEMP/releases.json"
+          git for-each-ref 'refs/tags/v*' --format='%(refname:short) %(objecttype) %(taggerdate:iso-strict)' \
+            > "$RUNNER_TEMP/tags.txt"
+          python3 -I .github/scripts/release_day.py "$RUNNER_TEMP/releases.json" "$RUNNER_TEMP/tags.txt" \
+            --tz "$RELEASE_TZ" > "$RUNNER_TEMP/day.txt"
+          . "$RUNNER_TEMP/day.txt"
+          if [ -n "$same_day" ]; then
+            echo "::warning::Already released today ($today, $RELEASE_TZ): $same_day. Publish this draft on or after $tomorrow."
+            { printf '> [!WARNING]\n> Hold until %s (%s): %s was already released today. Delete this note when publishing.\n\n' \
+                "$tomorrow" "$RELEASE_TZ" "$same_day"; cat notes.md; } > notes.tmp && mv notes.tmp notes.md
             echo "hold=$tomorrow" >> "$GITHUB_OUTPUT"
           fi
 
@@ -113,23 +120,28 @@ jobs:
           echo "Review and publish it under Releases; publishing creates the tag." >> "$GITHUB_STEP_SUMMARY"
 
   tag-check:
-    name: One tagged release a day
-    if: startsWith(github.ref, 'refs/tags/v')
+    name: One release a day
+    if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - name: No other v* tag made the same day
+      - name: No other release made the same day
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ github.event.release.tag_name || github.ref_name }}
         run: |
-          export TZ="$RELEASE_TZ"
-          day=$(git for-each-ref "refs/tags/$TAG" --format='%(creatordate:format-local:%F)')
-          others=$(git for-each-ref 'refs/tags/v*' --format='%(refname:short) %(creatordate:format-local:%F)' \
-                   | awk -v d="$day" -v me="$TAG" '$2 == d && $1 != me { print $1 }' | paste -sd ' ' -)
-          if [ -n "$others" ]; then
-            echo "::error::$TAG is a second tagged release on $day ($TZ), after: $others. The limit is one a day."
+          # The day is today: this runs as the release is published or the tag is pushed.
+          gh release list --limit 100 --json tagName,publishedAt,isDraft > "$RUNNER_TEMP/releases.json"
+          git for-each-ref 'refs/tags/v*' --format='%(refname:short) %(objecttype) %(taggerdate:iso-strict)' \
+            > "$RUNNER_TEMP/tags.txt"
+          python3 -I .github/scripts/release_day.py "$RUNNER_TEMP/releases.json" "$RUNNER_TEMP/tags.txt" \
+            --tz "$RELEASE_TZ" --exclude "$TAG" > "$RUNNER_TEMP/day.txt"
+          . "$RUNNER_TEMP/day.txt"
+          if [ -n "$same_day" ]; then
+            echo "::error::$TAG is a second release on $today ($RELEASE_TZ), after: $same_day. The limit is one a day."
             exit 1
           fi
-          echo "$TAG is the only tagged release on $day ($TZ)."
+          echo "$TAG is the only release on $today ($RELEASE_TZ)."
