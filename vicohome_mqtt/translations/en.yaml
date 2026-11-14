@@ -44,6 +44,18 @@ configuration:
       How often the bridge may wake the camera to pull clips from its SD card (cloud_first and sd_only).
       A smaller number wakes the camera more often and can shorten a battery camera's run time; a larger
       number is gentler but makes SD-sourced clips appear later. No effect with cloud_only.
+  visit_source:
+    name: Visit source
+    description: >-
+      How the bridge learns about visits. cloud: the cloud's event list, with species. sd_poll: the
+      bridge reads the camera's SD card every few minutes and treats each new recording as a visit, with
+      its clip and a snapshot from the card but no species. sd_poll needs a card in the camera.
+  sd_poll_minutes:
+    name: SD poll interval (minutes)
+    description: >-
+      With sd_poll, how often the bridge reads the card (15-1440, default 60). Each read wakes the camera
+      for about half a minute and signs the phone app out of live view meanwhile, so short intervals cost
+      battery. Visits show up this much later than they happen.
   save_clips:
     name: Save clips
     description: Turn each visit's clip into an MP4 under /config/www, linked as clip_url. Files there are served without a login.

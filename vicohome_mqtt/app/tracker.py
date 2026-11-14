@@ -37,6 +37,7 @@ class Tracker:
         self.seen: dict[str, float] = {}
         self.cameras: dict[str, dict[str, Any]] = {}
         self.last_poll: float = 0.0
+        self.last_sd_poll: float = 0.0  # end of the last SD-card window read (visit_source sd_poll)
         self.daily: dict[str, int] = {}  # local date -> visits
         self.tracked_since: float | None = None  # visits are complete from this time on
         self.clip_budget: dict[str, Any] = {}
@@ -56,6 +57,7 @@ class Tracker:
         self.seen = {k: float(v) for k, v in (data.get("seen") or {}).items()}
         self.cameras = data.get("cameras") or {}
         self.last_poll = float(data.get("last_poll") or 0)
+        self.last_sd_poll = float(data.get("last_sd_poll") or 0)
         self.daily = {k: int(v) for k, v in (data.get("daily") or {}).items()}
         self.tracked_since = data.get("tracked_since")
         self.clip_budget = data.get("clip_budget") or {}
@@ -71,6 +73,7 @@ class Tracker:
         tmp = self.path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump({"seen": self.seen, "cameras": self.cameras, "last_poll": self.last_poll,
+                       "last_sd_poll": self.last_sd_poll,
                        "daily": self.daily, "tracked_since": self.tracked_since,
                        "clip_budget": self.clip_budget}, fh)
         os.replace(tmp, self.path)

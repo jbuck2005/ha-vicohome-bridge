@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+- New option **`visit_source`**: `cloud` (default) or **`sd_poll`**. With `sd_poll` the bridge learns about
+  visits by reading the camera's microSD card every **`sd_poll_minutes`** (15-1440, default 60) instead of the
+  cloud's event list. Each new recording becomes a visit with its clip and a snapshot frame from the card, but
+  no species. Each read wakes the camera, so short intervals cost battery. The cloud is still used to log in,
+  list devices and open the local link.
+
 ## 0.4.1
 - A **Re-fetch clips** button and a **Re-fetch hours** number (default 2, up to 24) as Home Assistant
   entities. Pressing the button, or publishing a number of hours to `<base_topic>/clips/refetch`,
