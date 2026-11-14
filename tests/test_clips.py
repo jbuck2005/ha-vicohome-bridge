@@ -68,7 +68,7 @@ class FakeCloud:
         self.cm = ClipMaker(tmp_path, "/local/v", lambda url: self.text, clock=lambda: self.now)
         self.cm._remux = self.remux
 
-    def remux(self, trace_id, text):
+    def remux(self, trace_id, text, visit_ts=None):
         self.saved.append((trace_id, playlist_size(text)))
         (self.cm.folder / clip_name(trace_id)).write_bytes(b"mp4")
         return True
@@ -280,6 +280,41 @@ def test_refetch_remakes_only_clips_the_cloud_has_more_of(tmp_path):
 def test_refetch_counts_a_failed_remux(tmp_path):
     fc = FakeCloud(tmp_path, playlist(2.0, 2.0))
     fc.cm.file_seconds = lambda trace_id: 2.0
-    fc.cm._remux = lambda trace_id, text: False
+    fc.cm._remux = lambda trace_id, text, visit_ts=None: False
     (tmp_path / "fail0001.mp4").write_bytes(b"mp4")
     assert fc.cm.refetch([("fail0001", "https://v")])["failed"] == 1
+
+
+def test_retention_running_before_a_new_visit_is_saved_keeps_that_clip(tmp_path):
+    """A new event, then the clip limit drops the oldest file, then the new clip is saved a poll later."""
+    fc = FakeCloud(tmp_path, playlist(*[2.0] * 10))
+    (tmp_path / "oldest01.mp4").write_bytes(b"mp4")
+    (tmp_path / "kept0001.mp4").write_bytes(b"mp4")
+    fc.cm.queue("cam", "visit001", "https://v", period=20.0, visit_ts=fc.now - 70)
+    assert fc.poll(0) == []  # first sight of a fresh visit: not trusted yet
+    assert fc.cm.prune(["visit001", "kept0001"]) == 1  # "Removed 1 old clip(s)"
+    assert not (tmp_path / "oldest01.mp4").exists() and "visit001" in fc.cm.pending
+    fc.cm.queue("cam", "visit002", "https://v", period=20.0, visit_ts=fc.now)  # the next visit arrives
+    made = fc.poll()
+    assert ("cam", "visit001", "/local/v/visit001.mp4") in made
+    assert (tmp_path / "visit001.mp4").exists()
+
+
+def test_saved_clip_log_names_its_visit(tmp_path, caplog, monkeypatch):
+    import clips
+    import subprocess as sp
+    import time as _time
+
+    def fake_ffmpeg(cmd, **kw):
+        Path(cmd[-1]).write_bytes(b"x" * 4096)
+        return sp.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(clips.subprocess, "run", fake_ffmpeg)
+    cm = ClipMaker(tmp_path, "/local/v", lambda url: None)
+    visit = _time.mktime((2030, 1, 2, 9, 4, 0, 0, 0, -1))
+    with caplog.at_level("INFO", logger=clips.LOG.name):
+        assert cm._remux("logvis01", playlist(2.0), visit_ts=visit)
+        assert cm._remux("logvis02", playlist(2.0))
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Saved clip")]
+    assert lines[0].endswith("for the visit at 09:04:00")
+    assert "visit" not in lines[1]
