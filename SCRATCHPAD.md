@@ -5,6 +5,32 @@ between sessions. It is never merged into `main` or `edge`.
 
 ---
 
+## 2026-11-14: Can the bridge run local only?
+
+**What I found.** Not yet. `clip_source: sd_only` already pulls the video off the SD card peer to peer on
+my LAN, but the bridge still needs Vicohome's servers for login, the event list (how it learns a visit
+happened, plus species), the snapshot, the card check, and the WebRTC ticket and signalling that wake the
+camera and set up each SD session. The `api-local.safemo.com` / `127.0.0.1:15000` names in `sdfetch.py`
+are the phone app's own proxy, not a service on the camera.
+
+**Plan.**
+1. I run LAN probes on the camera (full port scan asleep and awake, mDNS/SSDP, ARP while asleep, a router
+   capture across one visit) to see if it has any local service or a clear wake signal.
+2. SD polling as a visit source: `visit_source: cloud | sd_poll`, `sd_poll_minutes` 15-1440 (default 60).
+   New SD segments become visits, snapshot is a frame from the clip, species left blank. Each poll wakes
+   the camera and signs the app out of live view for ~30 s, so battery sets the floor, not the code.
+3. Local wake watcher, if the probes show one: poll the card only after the camera is seen waking.
+4. Species from un-subscribird instead of the cloud.
+5. Local stand-in for the signalling servers, only if the camera doesn't pin TLS certificates.
+
+**Status.** Findings written up; nothing in code yet.
+
+**Next.**
+- Run the probes and share redacted output, or open a Remote Control session on my home machine.
+- Decide whether to start step 2 now.
+
+---
+
 ## 2026-11-14: The "missing" 09:04 clip wasn't missing
 
 **What I found.** In my log, the 09:04 visit got "Removed 1 old clip(s)" and no "Saved clip" after it,
