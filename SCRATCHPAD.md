@@ -18,11 +18,10 @@ than the release. The check could miss a second release on the same day, or hold
 - The check also runs when I publish a release, not only on a tag push.
 - `pytest tests`: 61 passed.
 
-**Status.** Pushed to PR #20, waiting on CI. `main` and `edge` still show as unprotected on GitHub.
+**Status.** PR #20 merged into `edge`. `RELEASE_TZ` is set to America/Toronto, and the ruleset now protects `main` and `edge`.
 
 **Next.**
-- Set `RELEASE_TZ` to `America/Toronto`, then merge #20 into `edge`.
-- Turn on the ruleset for `main` and `edge`.
+- The draft workflow starts working with the next release into `main`. 0.4.1 still needs its tag, on another day.
 
 ---
 
