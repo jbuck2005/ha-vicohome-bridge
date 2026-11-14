@@ -5,6 +5,22 @@ between sessions. It is never merged into `main` or `edge`.
 
 ---
 
+## 2026-11-14: Local-only work paused until the LAN probe runs at home
+
+**Where it stands.** I'm sticking with the camera's stock firmware; the modified-firmware route is dropped.
+The probe script (`cam_probe.sh`, kept in my project files, not this repo) scans the camera asleep and
+awake, records its broadcasts, and walks me through trying the app with the internet blocked. It prints a
+summary with the camera's IP and MAC removed. PR #21 (`visit_source: sd_poll`) is green and open for my review.
+
+**Status.** Paused until I set up the probe on my Docker host.
+
+**Next.**
+- Run `sudo ./cam_probe.sh <camera-ip>` on the Docker host and paste the summary in the thread.
+- If my phone allows it, capture the app's traffic with PCAPdroid while the internet is blocked.
+- Review and merge #21 into `edge`, then try `sd_poll` and watch the battery.
+
+---
+
 ## 2026-11-14: Visits from the SD card (sd_poll), and local-only leads
 
 **What I changed** (branch `dev/sd-poll-visits`, PR #21 into `edge`, edge build 0.4.2-dev.2):
