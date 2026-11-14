@@ -14,7 +14,7 @@ How versions move (since 0.4.1):
 - Merging the release into `main` drafts a GitHub Release for `v<version>` with that version's changelog notes
   (`.github/workflows/release.yml`). Nothing is published automatically: the maintainer reviews the draft and
   presses **Publish**, which creates the tag.
-- At most one tagged release a day (UTC). If a `v*` tag was already made that day, the draft says when it may be
+- At most one tagged release a day, counted in the `RELEASE_TZ` repository variable's time zone (UTC when unset). If a `v*` tag was already made that day, the draft says when it may be
   published, and a tag pushed by hand on the same day fails the Release workflow.
 
 Releasing, step by step:

@@ -5,8 +5,9 @@ name: Release
 # - A push to `main` that changes the add-on version (a release PR from `edge`) drafts a GitHub
 #   Release for `v<version>`, with that version's notes from the changelog. The tag is only created
 #   when the maintainer presses Publish on the draft.
-# - At most one release a day (UTC). If a `v*` tag was already made today, the draft still appears,
-#   but its notes start with a warning and the run shows the date it may be published.
+# - At most one release a day, counted in the time zone of the `RELEASE_TZ` repository variable
+#   (an IANA name such as America/Toronto; UTC when unset). If a `v*` tag was already made today,
+#   the draft still appears, but its notes start with a warning and the run shows the date it may be published.
 # - Pushing a `v*` tag by hand runs the same daily check and fails if another `v*` tag was made the
 #   same day, so a second release in a day shows up as a red run.
 
@@ -19,6 +20,9 @@ on:
 
 permissions:
   contents: read
+
+env:
+  RELEASE_TZ: ${{ vars.RELEASE_TZ || 'UTC' }}
 
 concurrency:
   group: release
@@ -74,14 +78,15 @@ jobs:
         id: daily
         if: steps.version.outputs.skip != 'true'
         run: |
-          today=$(date -u +%F)
-          tagged=$(TZ=UTC git for-each-ref 'refs/tags/v*' --format='%(refname:short) %(creatordate:format-local:%F)' \
+          export TZ="$RELEASE_TZ"
+          today=$(date +%F)
+          tagged=$(git for-each-ref 'refs/tags/v*' --format='%(refname:short) %(creatordate:format-local:%F)' \
                    | awk -v d="$today" '$2 == d { print $1 }' | paste -sd ' ' -)
           if [ -n "$tagged" ]; then
-            tomorrow=$(date -u -d tomorrow +%F)
-            echo "::warning::Already tagged today ($today UTC): $tagged. Publish this draft on or after $tomorrow."
-            { printf '> [!WARNING]\n> Hold until %s (UTC): %s was already tagged today. Delete this note when publishing.\n\n' \
-                "$tomorrow" "$tagged"; cat notes.md; } > notes.tmp && mv notes.tmp notes.md
+            tomorrow=$(date -d tomorrow +%F)
+            echo "::warning::Already tagged today ($today, $TZ): $tagged. Publish this draft on or after $tomorrow."
+            { printf '> [!WARNING]\n> Hold until %s (%s): %s was already tagged today. Delete this note when publishing.\n\n' \
+                "$tomorrow" "$TZ" "$tagged"; cat notes.md; } > notes.tmp && mv notes.tmp notes.md
             echo "hold=$tomorrow" >> "$GITHUB_OUTPUT"
           fi
 
@@ -103,7 +108,7 @@ jobs:
             echo "Drafted $tag" >> "$GITHUB_STEP_SUMMARY"
           fi
           if [ -n "$HOLD" ]; then
-            echo "Hold: another release was tagged today. Publish on or after $HOLD (UTC)." >> "$GITHUB_STEP_SUMMARY"
+            echo "Hold: another release was tagged today. Publish on or after $HOLD ($RELEASE_TZ)." >> "$GITHUB_STEP_SUMMARY"
           fi
           echo "Review and publish it under Releases; publishing creates the tag." >> "$GITHUB_STEP_SUMMARY"
 
@@ -119,11 +124,12 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
         run: |
-          day=$(TZ=UTC git for-each-ref "refs/tags/$TAG" --format='%(creatordate:format-local:%F)')
-          others=$(TZ=UTC git for-each-ref 'refs/tags/v*' --format='%(refname:short) %(creatordate:format-local:%F)' \
+          export TZ="$RELEASE_TZ"
+          day=$(git for-each-ref "refs/tags/$TAG" --format='%(creatordate:format-local:%F)')
+          others=$(git for-each-ref 'refs/tags/v*' --format='%(refname:short) %(creatordate:format-local:%F)' \
                    | awk -v d="$day" -v me="$TAG" '$2 == d && $1 != me { print $1 }' | paste -sd ' ' -)
           if [ -n "$others" ]; then
-            echo "::error::$TAG is a second tagged release on $day (UTC), after: $others. The limit is one a day."
+            echo "::error::$TAG is a second tagged release on $day ($TZ), after: $others. The limit is one a day."
             exit 1
           fi
-          echo "$TAG is the only tagged release on $day (UTC)."
+          echo "$TAG is the only tagged release on $day ($TZ)."
