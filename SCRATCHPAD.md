@@ -5,6 +5,20 @@ between sessions. It is never merged into `main` or `edge`.
 
 ---
 
+## 2026-11-14: Local checkout on my PC checked
+
+**What I found**
+- My local clone is on `main`, level with `origin/main` (0.4.1). Tracked files look untouched since my pull.
+- No local `edge` branch yet; `origin/edge` is one PR ahead of `main` (#19).
+- Two old desktop worktrees under `.claude/worktrees/` and their local branches are already merged.
+
+**Status:** Nothing lost. Cleanup is optional.
+
+**Next**
+- Make a local `edge` that tracks `origin/edge` and work from it.
+
+---
+
 ## 2026-11-14: Local-only work paused until the LAN probe runs at home
 
 **Where it stands.** I'm sticking with the camera's stock firmware; the modified-firmware route is dropped.
