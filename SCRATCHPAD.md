@@ -88,10 +88,10 @@ a clip that is still being made.
 - A test that retention running between a visit's event and its clip leaves that clip alone, and one for
   the new log line. `pytest tests`: 55 passed. `e2e_fake_cloud.py`: OK.
 
-**Status.** PR #19 into `edge` is open, waiting on CI and my review.
+**Status.** Merged into `edge` (#19). CI was green.
 
 **Next.**
-- Review and merge #19, then check the edge add-on's log reads clearly on the next few visits.
+- Check the edge add-on's log reads clearly on the next few visits.
 
 ---
 
