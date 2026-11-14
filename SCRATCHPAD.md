@@ -5,6 +5,31 @@ between sessions. It is never merged into `main` or `edge`.
 
 ---
 
+## 2026-11-14: Visits from the SD card (sd_poll), and local-only leads
+
+**What I changed** (branch `dev/sd-poll-visits`, PR #21 into `edge`, edge build 0.4.2-dev.2):
+- New `visit_source: cloud | sd_poll` and `sd_poll_minutes` (15-1440, default 60). With `sd_poll` the bridge
+  reads the camera's SD card on that interval and each new recording is a visit, with its clip and a
+  snapshot frame from the card, no species. Clips always come from the card in this mode.
+- Recordings under 90 s old wait for the next read; windows overlap by 15 min; a failed read is retried
+  next time; a restart doesn't wake the camera early. Cloud-listed visits aren't counted twice.
+- `pytest tests`: 64 passed. `e2e_fake_cloud.py`: OK.
+
+**What I found (reverse engineering).** Stock cameras show no open ports and no LAN signalling in what
+others have published. The only local method reported is modified vendor firmware (encrypted `.fw`
+update zip opened with bkcrack, SD-card bootstrap, then root SSH, local RTSP and a local events API).
+It's unpublished and has no licence, so I'd have to redo the steps myself. UART pads (LOG_TX/LOG_RX) are
+reported on the board.
+
+**Status.** PR #21 waiting on CI and my review. Reverse engineering waiting on LAN probes from me.
+
+**Next.**
+- Review #21; try `sd_poll` on the edge add-on and watch battery for a few days.
+- Run the LAN probes (in the findings doc), or open a Remote Control session at home.
+- Capture one firmware update download to get the `.fw` file.
+
+---
+
 ## 2026-11-14: Can the bridge run local only?
 
 **What I found.** Not yet. `clip_source: sd_only` already pulls the video off the SD card peer to peer on
