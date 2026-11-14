@@ -422,6 +422,42 @@ async def _run(api, serial: str, visits: list[tuple], iface_ip, per_clip_s, log)
     return out
 
 
+async def _poll(api, serial: str, start: float, stop: float, known, max_fetch: int,
+                iface_ip, per_clip_s, log) -> list[dict]:
+    t = _Tunnel(api, serial, iface_ip, log)
+    try:
+        await t.connect()
+        await t.prepare()
+        seg = [s for s in await t.list_segments(start, stop)
+               if s.get("timestamp") and (s.get("period") or 0) >= 3 and not known(s)]
+        seg.sort(key=lambda s: s["timestamp"], reverse=True)   # newest first: they matter most
+        log.info("sdpoll: camera lists %d new SD recording(s) since the last poll", len(seg))
+        for s in seg[:max_fetch]:
+            s["data"] = await t.fetch(s["name"], per_clip_s)
+            if not s["data"]:
+                log.warning("sdpoll: no data for %s", s["name"])
+        return sorted(seg, key=lambda s: s["timestamp"])
+    finally:
+        await t.close()
+
+
+def poll_sd_recordings(api, serial: str, start: float, stop: float, known=lambda seg: False,
+                       max_fetch: int = 30, iface_ip: str | None = None, per_clip_s: float = 90,
+                       log: logging.Logger = LOG) -> list[dict] | None:
+    """List the camera's SD recordings in [start, stop] that ``known(segment)`` does not already know.
+
+    Each is a motion recording, so each is a visit. Returns them oldest first as dicts with name,
+    timestamp, period and, for the newest ``max_fetch``, the MP4 bytes as "data" (None if the fetch
+    failed). One WebRTC session (one camera wake). Returns None if the session could not be opened, so
+    the caller can try the same window again.
+    """
+    try:
+        return asyncio.run(_poll(api, serial, start, stop, known, max_fetch, iface_ip, per_clip_s, log))
+    except Exception as err:
+        log.warning("sdpoll: session failed: %s", err)
+        return None
+
+
 def fetch_sd_clips(api, serial: str, visits: list[tuple], iface_ip: str | None = None,
                    per_clip_s: float = 90, log: logging.Logger = LOG) -> dict:
     """Pull the full SD recording for each (trace_id, unix_ts) visit. Returns {trace_id: mp4 bytes}.

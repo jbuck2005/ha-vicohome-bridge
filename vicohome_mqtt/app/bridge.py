@@ -7,6 +7,7 @@ the Home Assistant entities through MQTT discovery.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -28,7 +29,7 @@ from clips import PERIOD_SLACK_S, TRUST_AFTER_S, ClipBudget, ClipMaker, clip_nam
 from tracker import Tracker
 from vicohome import AuthError, Device, Event, VicohomeClient, VicohomeError
 
-VERSION = "0.4.1"
+VERSION = "0.4.2-dev.2"
 LOG = logging.getLogger("vicohome")
 OPTIONS_FILE = "/data/options.json"
 STATE_FILE = "/data/state.json"
@@ -49,10 +50,32 @@ SD_MAX_TRIES = 2
 # hourly clip repair. Higher means fewer camera wakes and longer battery life, at the cost of a longer wait
 # before an incomplete (cloud_first) or SD-sourced (sd_only) clip appears. cloud_only never wakes the camera.
 SD_FETCH_HOURS_DEFAULT, SD_FETCH_HOURS_MAX = 1, 24
+# visit_source sd_poll: learn about visits by reading the camera's SD card every sd_poll_minutes instead
+# of the cloud's event list. Each poll wakes the battery camera and signs the phone app out of live view
+# for about half a minute, so the interval has a floor. A recording that started less than SD_SETTLE_S
+# ago may still be growing and waits for the next poll; windows overlap by SD_POLL_OVERLAP_S so it is
+# picked up then. At most SD_POLL_MAX_FETCH clips are pulled per poll; older ones are left to the backfill.
+SD_POLL_MINUTES_DEFAULT, SD_POLL_MINUTES_MIN, SD_POLL_MINUTES_MAX = 60, 15, 1440
+SD_POLL_WARN_BELOW = 30
+SD_SETTLE_S = 90
+SD_POLL_OVERLAP_S = 900
+SD_POLL_MAX_FETCH = 30
 # Re-fetch clips button: how many hours back the manual re-fetch lists by default, and its ceiling.
 REFETCH_HOURS_DEFAULT, REFETCH_HOURS_MAX = 2, 24
 # HA serves <config>/www at /local/. New-style map "homeassistant_config" mounts it at /homeassistant.
 HA_CONFIG_DIRS = (Path("/homeassistant"), Path("/config"))
+
+
+def jpeg_frame(path: Path, at_s: float = 1.0, ffmpeg: str = "ffmpeg", timeout_s: int = 30) -> bytes | None:
+    """One JPEG frame from a video file, or None."""
+    import subprocess
+    try:
+        out = subprocess.run([ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error", "-ss", f"{at_s:.2f}",
+                              "-i", str(path), "-frames:v", "1", "-q:v", "3", "-f", "image2", "-c:v", "mjpeg",
+                              "pipe:1"], capture_output=True, timeout=timeout_s, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return out.stdout if out.returncode == 0 and out.stdout.startswith(b"\xff\xd8") else None
 
 
 def slug(text: str) -> str:
@@ -68,6 +91,7 @@ def load_options() -> dict[str, Any]:
         "motion_seconds": 60, "log_level": "info",
         "save_clips": True, "clips_to_keep": 60, "clips_max": 600, "clip_folder": "vicohome",
         "clip_source": "cloud_first", "sd_fetch_hours": 1,
+        "visit_source": "cloud", "sd_poll_minutes": SD_POLL_MINUTES_DEFAULT,
         "mqtt_host": "", "mqtt_port": 1883, "mqtt_username": "", "mqtt_password": "",
     }
     try:
@@ -85,6 +109,30 @@ def hours_from(payload: bytes, default: int) -> int:
     except (UnicodeDecodeError, ValueError, OverflowError):
         return default
     return min(REFETCH_HOURS_MAX, max(1, hours))
+
+
+def sd_poll_minutes(opts: dict[str, Any]) -> int:
+    """The SD poll interval, held to 15-1440 minutes (a bad value falls back to the default)."""
+    try:
+        minutes = int(opts.get("sd_poll_minutes") or SD_POLL_MINUTES_DEFAULT)
+    except (TypeError, ValueError):
+        minutes = SD_POLL_MINUTES_DEFAULT
+    return min(SD_POLL_MINUTES_MAX, max(SD_POLL_MINUTES_MIN, minutes))
+
+
+def sd_polling(opts: dict[str, Any]) -> bool:
+    return opts.get("visit_source", "cloud") == "sd_poll"
+
+
+def clip_mode(opts: dict[str, Any]) -> str:
+    """clip_source, except that visits found on the SD card always take their clip from the card."""
+    return "sd_only" if sd_polling(opts) else opts.get("clip_source", "cloud_first")
+
+
+def sd_trace_id(serial: str, ts: float) -> str:
+    """A visit id for an SD recording: stable across polls, unique per camera, and free of the serial
+    (clip file names are served under /local/ without a login)."""
+    return f"sd-{hashlib.sha256(serial.encode()).hexdigest()[:6]}-{int(ts)}"
 
 
 def mqtt_settings(opts: dict[str, Any]) -> dict[str, Any]:
@@ -138,6 +186,7 @@ class Bridge:
         self._last_save = 0.0
         self._next_repair = time.time() + REPAIR_FIRST_AFTER_S
         self._next_sd_fetch = 0.0   # next time the camera may be woken for SD clips (sd_fetch_hours)
+        self._next_sd_poll = 0.0    # next SD-card visit poll (visit_source sd_poll)
 
     # ---- MQTT -----------------------------------------------------------
     def _mqtt_client(self) -> mqtt.Client:
@@ -328,7 +377,7 @@ class Bridge:
                 and int(r.get("clip_repairs") or 0) < MAX_REPAIRS and not self.clips.busy(r["trace_id"])]
         if not recs:
             return
-        if self.opts.get("clip_source", "cloud_first") == "sd_only":
+        if self.clip_mode() == "sd_only":
             self.sd_backfill(now, recs, {})   # the card is the source; no cloud re-list or remake
             return
         events = self.api.events(min(r["timestamp"] for r in recs) - 60, now)
@@ -371,7 +420,7 @@ class Bridge:
         briefly signs the phone app out (one live session per camera), so wakes are spaced by sd_fetch_hours
         and capped per cycle. cloud_only never touches the card.
         """
-        mode = self.opts.get("clip_source", "cloud_first")
+        mode = clip_mode(self.opts)
         if mode == "cloud_only":
             return
         from collections import defaultdict
@@ -436,6 +485,12 @@ class Bridge:
                 changed = True
             if changed:
                 self.publish_clip_storage()
+
+    def sd_polling(self) -> bool:
+        return sd_polling(self.opts)
+
+    def clip_mode(self) -> str:
+        return clip_mode(self.opts)
 
     @staticmethod
     def _lan_ip() -> str | None:
@@ -637,6 +692,28 @@ class Bridge:
             self.ensure_discovery(dev.serial)
             self.publish_telemetry(dev)
 
+        if self.sd_polling():
+            self.sd_poll(now)
+        else:
+            self.cloud_visits(now)
+
+        for serial in set(self.tracker.cameras) | set(self.device_info):
+            self.ensure_discovery(serial)
+            self.publish_camera_state(serial, now)
+
+        self.repair_clips(now)
+        self.handle_clips()
+        self.clip_audit(now)
+        self.tracker.last_poll = now
+        self.tracker.prune(now)
+        # Only write the state file when something changed (it sits on the HA box's SD card).
+        if self.tracker.dirty or now - self._last_save > 3600:
+            self.tracker.save()
+            self._last_save = now
+        self.cleanup_media(now)
+
+    def cloud_visits(self, now: float) -> None:
+        """New visits from the cloud's event list (visit_source cloud)."""
         bootstrap = not self.tracker.bootstrapped
         start = self.tracker.window_start(now, float(self.opts["bootstrap_hours"]))
         events = self.api.events(start, now)
@@ -662,13 +739,13 @@ class Bridge:
                          f" ({ev.confidence:.0f}%)" if ev.confidence else "", rec["time"])
                 self.handle_image(rec, publish=True)
                 self.publish_live_event(rec)
-                if self.clips and self.opts.get("clip_source", "cloud_first") != "sd_only":
+                if self.clips and self.clip_mode() != "sd_only":
                     self.clips.queue(ev.serial, ev.trace_id, rec.get("video_url", ""),  # made at the end of the poll
                                      rec.get("period"), rec["timestamp"])
         if bootstrap:
             for serial, rec in newest.items():  # show the newest picture once, no event/motion
                 self.handle_image(rec, publish=True)
-        if self.clips and self.opts.get("clip_source", "cloud_first") != "sd_only":  # cloud clips for recent visits
+        if self.clips and self.clip_mode() != "sd_only":  # cloud clips for recent visits
             for serial in self.tracker.cameras:
                 for rec in self.tracker.recent(serial, min(RECENT_IN_ATTRIBUTES, self.budget.cap)):
                     if not rec.get("clip_url"):
@@ -677,24 +754,148 @@ class Bridge:
                         if url:
                             self.tracker.set_field(serial, rec["trace_id"], "clip_url", url)
 
-        for serial in set(self.tracker.cameras) | set(self.device_info):
-            self.ensure_discovery(serial)
-            self.publish_camera_state(serial, now)
+    def sd_poll(self, now: float) -> None:
+        """New visits read off each camera's SD card (visit_source sd_poll).
 
-        self.repair_clips(now)
-        self.handle_clips()
-        self.clip_audit(now)
-        self.tracker.last_poll = now
-        self.tracker.prune(now)
-        # Only write the state file when something changed (it sits on the HA box's SD card).
-        if self.tracker.dirty or now - self._last_save > 3600:
-            self.tracker.save()
-            self._last_save = now
-        self.cleanup_media(now)
+        Every recording on the card is a motion recording, so each new one is a visit: it gets its clip
+        straight from the card and a snapshot taken from that clip. The card knows nothing of species, so
+        these visits are "Unidentified". The cloud is still used for the device list and to open the
+        session (ticket and signalling), but not for the event list or images.
+        """
+        minutes = sd_poll_minutes(self.opts)
+        if not self._next_sd_poll and self.tracker.last_sd_poll:
+            self._next_sd_poll = self.tracker.last_sd_poll + minutes * 60   # a restart doesn't wake the camera early
+        if now < self._next_sd_poll:
+            return
+        self._next_sd_poll = now + minutes * 60
+        bootstrap = not self.tracker.last_sd_poll
+        if bootstrap:
+            start = now - float(self.opts["bootstrap_hours"]) * 3600
+            if self.tracker.tracked_since is None:
+                self.tracker.tracked_since = start
+        else:
+            start = self.tracker.last_sd_poll - SD_POLL_OVERLAP_S
+        start = max(start, now - 24 * 3600)
+        try:
+            from sdfetch import poll_sd_recordings
+        except Exception as err:
+            LOG.warning("SD polling unavailable (WebRTC deps missing?): %s", err)
+            return
+        iface = self._lan_ip()
+        all_ok = True
+        for serial in sorted(self.device_info):
+            known = self._sd_known(serial)
+
+            LOG.info("SD poll: reading camera %s's card", self.device_info[serial].name or serial)
+            got = poll_sd_recordings(self.api, serial, start, now, known=known, max_fetch=SD_POLL_MAX_FETCH,
+                                     iface_ip=iface, log=LOG)
+            if got is None:
+                all_ok = False
+                continue
+            self.ingest_sd_recordings(serial, got, now, bootstrap)
+        if all_ok:
+            # Recordings still being written were skipped; the overlap brings them back next time.
+            self.tracker.last_sd_poll = now
+            self.tracker.dirty = True
+
+    def _sd_known(self, serial: str):
+        """A test for SD recordings this camera's history already has: one read on an earlier poll, or a
+        visit the cloud listed before the switch to sd_poll (same matching as the SD backfill)."""
+        seen = self.tracker.seen
+        cloud = [r["timestamp"] for r in self.tracker.recent(serial, 1000) if not str(r["trace_id"]).startswith("sd-")]
+
+        def known(seg: dict) -> bool:
+            ts = float(seg["timestamp"])
+            if sd_trace_id(serial, ts) in seen:
+                return True
+            end = ts + float(seg.get("period") or 20) + 2
+            return any(ts - 5 <= v <= end for v in cloud)
+        return known
+
+    def ingest_sd_recordings(self, serial: str, recs: list[dict], now: float, bootstrap: bool) -> int:
+        """Turn SD recordings into visits; returns how many were new."""
+        dev = self.device_info.get(serial)
+        name = (dev.name if dev else "") or (self.tracker.cameras.get(serial) or {}).get("name") or f"Camera {serial}"
+        events, data = [], {}
+        for r in recs:
+            ts = float(r["timestamp"])
+            if ts > now - SD_SETTLE_S:
+                continue   # may still be recording; the next poll's window covers it
+            trace = sd_trace_id(serial, ts)
+            events.append(Event(trace_id=trace, serial=serial, camera_name=name, timestamp=ts,
+                                bird="Unidentified", latin="", confidence=None,
+                                period=float(r["period"]) if r.get("period") else None,
+                                image_url="", keyshot_url="", video_url=""))
+            if r.get("data"):
+                data[trace] = r["data"]
+        new = self.tracker.ingest(events)
+        if new:
+            LOG.info("%d new visit(s) on the SD card%s", len(new), " (initial history load)" if bootstrap else "")
+        newest = None
+        for ev in new:
+            self.ensure_discovery(serial)
+            rec = next(r for r in self.tracker.recent(serial, 500) if r["trace_id"] == ev.trace_id)
+            newest = rec
+            clip = data.get(ev.trace_id)
+            frame = self._save_sd_clip(rec, clip) if clip else None
+            if bootstrap:
+                continue
+            LOG.info("%s: visit at %s (from the SD card)", name, rec["time"])
+            if frame:
+                self.mqtt.publish(f"{self.base}/{serial}/image", frame, qos=1, retain=True)
+            self.publish_live_event(rec)
+        if bootstrap and newest and newest.get("saved_image"):
+            try:
+                self.mqtt.publish(f"{self.base}/{serial}/image", (MEDIA_ROOT / newest["saved_image"]).read_bytes(),
+                                  qos=1, retain=True)
+            except OSError:
+                pass
+        if data:
+            self.publish_clip_storage()
+        return len(new)
+
+    def _save_sd_clip(self, rec: dict[str, Any], clip: bytes) -> bytes | None:
+        """Keep an SD visit's MP4 (when clips are on) and return a JPEG frame from it for the snapshot."""
+        serial, trace_id = rec["serial"], rec["trace_id"]
+        folder = self.clips.folder if self.clips else Path("/tmp")
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+        except OSError as err:
+            LOG.warning("Could not create %s: %s", folder, err)
+            return None
+        tmp = folder / f"{trace_id}.sdpart"
+        frame = None
+        try:
+            tmp.write_bytes(clip)
+            secs = mp4_seconds(tmp)
+            if not secs:
+                LOG.warning("SD poll: %s is not a readable MP4", trace_id)
+                return None
+            frame = jpeg_frame(tmp, at_s=min(1.0, secs / 2), ffmpeg=self.clips.ffmpeg if self.clips else "ffmpeg")
+            if self.clips:
+                path = self.clips.path_for(trace_id)
+                tmp.replace(path)
+                self.tracker.set_field(serial, trace_id, "clip_seconds", secs)
+                self.tracker.set_field(serial, trace_id, "clip_url", self.clips.url_for(trace_id))
+                LOG.info("Saved clip %s (%.1f s, from the SD card)", path.name, secs)
+        except OSError as err:
+            LOG.warning("Could not save the SD clip for %s: %s", trace_id, err)
+        finally:
+            tmp.unlink(missing_ok=True)
+        if frame:
+            rel = self._save_image(rec, frame, "image/jpeg")
+            if rel:
+                self.tracker.set_field(serial, trace_id, "saved_image", rel)
+        return frame
 
     def run(self) -> None:
         interval = max(30, int(self.opts["poll_interval"]))
         LOG.info("Vicohome MQTT bridge %s: polling every %ss, base topic %s", VERSION, interval, self.base)
+        if self.sd_polling():
+            minutes = sd_poll_minutes(self.opts)
+            LOG.info("Visits come from the camera's SD card, read every %d min", minutes)
+            if minutes < SD_POLL_WARN_BELOW:
+                LOG.warning("SD polling every %d min wakes the camera often and can run a battery camera flat", minutes)
         # Re-publish what we already know so entities come back right away after a restart.
         for serial in self.tracker.cameras:
             self.ensure_discovery(serial)
