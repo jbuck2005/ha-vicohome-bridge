@@ -2,7 +2,7 @@ import sys, struct
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "vicohome_mqtt" / "app"))
 
-from sdfetch import _match, segment_name, _Tunnel  # noqa: E402
+from sdfetch import _match, assign_segments, segment_name, _Tunnel  # noqa: E402
 from datetime import timezone, timedelta  # noqa: E402
 
 EST = timezone(timedelta(hours=-5))
@@ -20,6 +20,27 @@ def test_match_picks_the_covering_segment():
     assert _match(seg, 1794517542)["name"] == "a.mp4"
     # a visit far from any segment start
     assert _match(seg, 1794500000) is None
+
+
+def test_one_recording_goes_to_one_visit():
+    # one 120 s recording on the card, and two visits 99 s apart inside it
+    seg = [{"name": "long.mp4", "period": 120, "timestamp": 1794517000},
+           {"name": "short.mp4", "period": 20, "timestamp": 1794518000}]
+    visits = [("visit-a", 1794517002), ("visit-b", 1794517101), ("visit-c", 1794518001), ("visit-d", 1794600000)]
+    want, shared = assign_segments(seg, visits)
+    assert want == {"long.mp4": ["visit-a"], "short.mp4": ["visit-c"]}   # visit-b keeps its cloud clip
+    assert shared == 1                                                   # visit-d matched nothing at all
+
+
+def test_closest_visit_wins_whatever_the_order():
+    seg = [{"name": "long.mp4", "period": 120, "timestamp": 1794517000}]
+    want, _ = assign_segments(seg, [("late", 1794517090), ("early", 1794517001)])
+    assert want == {"long.mp4": ["early"]}
+
+
+def test_too_short_recordings_are_skipped():
+    seg = [{"name": "blip.mp4", "period": 2, "timestamp": 1794517000}]
+    assert assign_segments(seg, [("v", 1794517000)]) == ({}, 0)
 
 
 def frame(typ, sid, flags, payload=b""):
