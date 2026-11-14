@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.4.1
+- A **Re-fetch clips** button and a **Re-fetch hours** number (default 2, up to 24) as Home Assistant
+  entities. Pressing the button, or publishing a number of hours to `<base_topic>/clips/refetch`,
+  re-lists the visits of that many hours, compares each saved clip with the cloud's current video and
+  makes the file again, under the same name, where the cloud now has more. Only clips still on disk are
+  touched, so the clip limit holds. The counts (checked, re-made, unchanged, gone from the cloud) are
+  logged and published as `last_refetch` on the Clip storage entity. This is the on-demand companion to
+  the hourly repair added in 0.3.6.
+- An **edge channel**: changes now merge into the `edge` branch first and reach `main` as a release.
+  Home Assistant can install the edge add-on alongside the released one from
+  `https://github.com/jbuck2005/ha-vicohome-bridge#edge`; it carries a `-dev.N` version and offers an
+  update after each merge. See the README.
+- New clip source **`sd_only`**: take every visit's clip from the camera's microSD card rather than the cloud
+  (the cloud is still used for the bird events and snapshots). `clip_source` is now `cloud_first` (default),
+  `sd_only`, or `cloud_only`.
+- New option **`sd_fetch_hours`** (1-24, default 1): how often the camera may be woken to pull clips from its
+  card, for both `cloud_first` and `sd_only`. A low value wakes a battery camera often and can shorten its run
+  time; a higher value is gentler but makes SD-sourced clips appear later. `cloud_only` never wakes the camera.
+
 ## 0.4.0
 - Clips the cloud only has part of are backfilled from the camera's microSD card. When a visit's
   cloud video is incomplete (the cloud reports `receivedAllSlice` false) and the camera has a card,
@@ -35,7 +54,6 @@
 - A visit's `period` (video length) in the `last` topic and the state file follows the cloud's
   newer value instead of keeping the one from when the visit was first listed. The `event` topic
   still carries the first value.
-
 ## 0.3.4
 - Logo: a wifi symbol replaces the dot on the "i" of "-bridge", as on the "i" of un-subscribird's "bird".
 

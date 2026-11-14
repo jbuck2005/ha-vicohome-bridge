@@ -28,7 +28,7 @@ from clips import PERIOD_SLACK_S, TRUST_AFTER_S, ClipBudget, ClipMaker, clip_nam
 from tracker import Tracker
 from vicohome import AuthError, Device, Event, VicohomeClient, VicohomeError
 
-VERSION = "0.4.0"
+VERSION = "0.4.1"
 LOG = logging.getLogger("vicohome")
 OPTIONS_FILE = "/data/options.json"
 STATE_FILE = "/data/state.json"
@@ -45,6 +45,12 @@ MAX_REPAIRS = 3
 # briefly signs the phone app out, so it is capped per cycle and tried a limited number of times.
 SD_MAX_PER_CYCLE = 6
 SD_MAX_TRIES = 2
+# How often the camera may be woken to pull clips from its SD card (hours). The default, 1, matches the
+# hourly clip repair. Higher means fewer camera wakes and longer battery life, at the cost of a longer wait
+# before an incomplete (cloud_first) or SD-sourced (sd_only) clip appears. cloud_only never wakes the camera.
+SD_FETCH_HOURS_DEFAULT, SD_FETCH_HOURS_MAX = 1, 24
+# Re-fetch clips button: how many hours back the manual re-fetch lists by default, and its ceiling.
+REFETCH_HOURS_DEFAULT, REFETCH_HOURS_MAX = 2, 24
 # HA serves <config>/www at /local/. New-style map "homeassistant_config" mounts it at /homeassistant.
 HA_CONFIG_DIRS = (Path("/homeassistant"), Path("/config"))
 
@@ -61,6 +67,7 @@ def load_options() -> dict[str, Any]:
         "save_images": True, "media_folder": "vicohome", "retention_days": 30,
         "motion_seconds": 60, "log_level": "info",
         "save_clips": True, "clips_to_keep": 60, "clips_max": 600, "clip_folder": "vicohome",
+        "clip_source": "cloud_first", "sd_fetch_hours": 1,
         "mqtt_host": "", "mqtt_port": 1883, "mqtt_username": "", "mqtt_password": "",
     }
     try:
@@ -69,6 +76,15 @@ def load_options() -> dict[str, Any]:
     except FileNotFoundError:
         pass
     return defaults
+
+
+def hours_from(payload: bytes, default: int) -> int:
+    """Hours for a clip re-fetch: a number in the payload (1-24), otherwise the default."""
+    try:
+        hours = round(float(payload.decode().strip()))
+    except (UnicodeDecodeError, ValueError, OverflowError):
+        return default
+    return min(REFETCH_HOURS_MAX, max(1, hours))
 
 
 def mqtt_settings(opts: dict[str, Any]) -> dict[str, Any]:
@@ -97,6 +113,8 @@ class Bridge:
         except ZoneInfoNotFoundError:
             self.tz = ZoneInfo("UTC")
         self.status_topic = f"{self.base}/status"
+        self.refetch_topic = f"{self.base}/clips/refetch"
+        self.refetch_hours_topic = f"{self.base}/clips/refetch_hours"
         self.stop = threading.Event()
         self.discovered: set[str] = set()
         self.device_info: dict[str, Device] = {}
@@ -105,6 +123,13 @@ class Bridge:
         self.tracker = Tracker(STATE_FILE, self.tz)
         self.api = VicohomeClient(opts["email"], opts["password"], opts["region"],
                                   opts.get("api_base_override") or "")
+        # A poll and a clip re-fetch (started from MQTT) never run at the same time.
+        self.lock = threading.Lock()
+        self.refetch_hours = REFETCH_HOURS_DEFAULT
+        self.refetching = False
+        self._refetch_hours_known = False
+        self.last_refetch: dict[str, Any] | None = None
+        self.clips: ClipMaker | None = None
         self.mqtt = self._mqtt_client()
         self._last_cleanup = 0.0
         self.clips = self._clip_maker()
@@ -112,6 +137,7 @@ class Bridge:
                                  int(self.opts["clips_max"]))
         self._last_save = 0.0
         self._next_repair = time.time() + REPAIR_FIRST_AFTER_S
+        self._next_sd_fetch = 0.0   # next time the camera may be woken for SD clips (sd_fetch_hours)
 
     # ---- MQTT -----------------------------------------------------------
     def _mqtt_client(self) -> mqtt.Client:
@@ -136,6 +162,11 @@ class Bridge:
         client.publish(self.status_topic, "online", qos=1, retain=True)
         client.subscribe(f"{self.prefix}/status")
         client.message_callback_add(f"{self.prefix}/status", self._on_ha_status)
+        for topic, handler in ((self.refetch_topic, self._on_refetch),
+                               (f"{self.refetch_hours_topic}/set", self._on_refetch_hours),
+                               (self.refetch_hours_topic, self._on_refetch_hours)):  # retained: restores it
+            client.subscribe(topic)
+            client.message_callback_add(topic, handler)
         # Re-send discovery after a reconnect (the broker may have restarted without persistence).
         for serial in list(self.discovered):
             self._publish_discovery(serial)
@@ -228,6 +259,13 @@ class Bridge:
                 "name": "Clip limit", "icon": "mdi:arrow-expand-vertical", "unit_of_measurement": "clips",
                 "entity_category": "diagnostic", "state_topic": f"{self.base}/clips",
                 "value_template": "{{ value_json.limit }}"})
+            cfg("button", "refetch_clips", {
+                "name": "Re-fetch clips", "icon": "mdi:filmstrip-box-multiple",
+                "command_topic": self.refetch_topic, "payload_press": "PRESS"})
+            cfg("number", "refetch_hours", {
+                "name": "Re-fetch hours", "icon": "mdi:history", "entity_category": "config",
+                "command_topic": f"{self.refetch_hours_topic}/set", "state_topic": self.refetch_hours_topic,
+                "min": 1, "max": REFETCH_HOURS_MAX, "step": 1, "mode": "box", "unit_of_measurement": "h"})
         self.discovered.add(serial)
 
     def ensure_discovery(self, serial: str) -> None:
@@ -290,6 +328,9 @@ class Bridge:
                 and int(r.get("clip_repairs") or 0) < MAX_REPAIRS and not self.clips.busy(r["trace_id"])]
         if not recs:
             return
+        if self.opts.get("clip_source", "cloud_first") == "sd_only":
+            self.sd_backfill(now, recs, {})   # the card is the source; no cloud re-list or remake
+            return
         events = self.api.events(min(r["timestamp"] for r in recs) - 60, now)
         self.tracker.refresh(events)
         fresh = {e.trace_id: e for e in events}
@@ -322,35 +363,50 @@ class Bridge:
         self.sd_backfill(now, recs, fresh)
 
     def sd_backfill(self, now: float, recs: list, fresh: dict) -> None:
-        """Pull full recordings off the camera's SD card for visits the cloud only has part of.
+        """Pull full recordings off the camera's SD card.
 
-        Runs after the cloud repair. A candidate is a kept clip that is short while the cloud marks
-        the visit incomplete (receivedAllSlice false) and the camera has a card. Capped per cycle to
-        spare the battery camera; a fetch briefly signs the phone app out (one live session per camera).
+        With clip_source cloud_first this backfills only the visits the cloud left incomplete
+        (receivedAllSlice false) whose clip is shorter than the cloud's; with sd_only the card is the
+        source and every kept visit without a clip is fetched. Each run wakes the battery camera once and
+        briefly signs the phone app out (one live session per camera), so wakes are spaced by sd_fetch_hours
+        and capped per cycle. cloud_only never touches the card.
         """
-        if self.opts.get("clip_source", "cloud_first") != "cloud_first":
+        mode = self.opts.get("clip_source", "cloud_first")
+        if mode == "cloud_only":
             return
         from collections import defaultdict
         want = defaultdict(list)   # serial -> [(trace, ts), ...]
         for rec in recs:
             serial, trace_id = rec["serial"], rec["trace_id"]
-            ev = fresh.get(trace_id)
-            if ev is None or ev.received_all_slice:
-                continue  # the cloud has the whole clip (or we can't tell); the cloud path handles it
             if int(rec.get("sd_tries") or 0) >= SD_MAX_TRIES or self.clips.busy(trace_id):
                 continue
-            have = rec.get("clip_seconds")
-            if have is None and self.clips.path_for(trace_id).exists():
-                have = mp4_seconds(self.clips.path_for(trace_id))
-            if have is not None and have > (ev.period or 0) + PERIOD_SLACK_S:
-                continue  # our clip is already as long as anything; nothing to gain
+            if mode == "sd_only":
+                if rec.get("clip_seconds") and self.clips.path_for(trace_id).exists():
+                    continue  # already have this visit's clip from the card
+            else:  # cloud_first: only what the cloud left incomplete and still short
+                ev = fresh.get(trace_id)
+                if ev is None or ev.received_all_slice:
+                    continue  # the cloud has the whole clip (or we can't tell); the cloud path handles it
+                have = rec.get("clip_seconds")
+                if have is None and self.clips.path_for(trace_id).exists():
+                    have = mp4_seconds(self.clips.path_for(trace_id))
+                if have is not None and have > (ev.period or 0) + PERIOD_SLACK_S:
+                    continue  # our clip is already as long as anything; nothing to gain
             want[serial].append((trace_id, rec["timestamp"]))
         if not want:
             return
+        # One camera wake per run; space the wakes out per the user's setting to spare the battery.
+        interval = max(1, min(SD_FETCH_HOURS_MAX,
+                              int(self.opts.get("sd_fetch_hours", SD_FETCH_HOURS_DEFAULT) or SD_FETCH_HOURS_DEFAULT)))
+        if now < self._next_sd_fetch:
+            LOG.debug("SD fetch: %d clip(s) waiting for the next window (every %d h)",
+                      sum(len(v) for v in want.values()), interval)
+            return
+        self._next_sd_fetch = now + interval * 3600
         try:
             from sdfetch import fetch_sd_clips
         except Exception as err:
-            LOG.warning("SD backfill unavailable (WebRTC deps missing?): %s", err)
+            LOG.warning("SD fetch unavailable (WebRTC deps missing?): %s", err)
             return
         iface = self._lan_ip()
         for serial, visits in want.items():
@@ -413,6 +469,57 @@ class Bridge:
         self.tracker.dirty = True
         self.publish_clip_storage()
 
+    def _on_refetch_hours(self, client, userdata, msg) -> None:
+        hours = hours_from(msg.payload, self.refetch_hours)
+        if msg.topic.endswith("/set"):
+            self.pub(self.refetch_hours_topic, str(hours))
+        self.refetch_hours = hours
+        self._refetch_hours_known = True
+
+    def publish_refetch_hours(self) -> None:
+        """Give the hours entity a value on first start (later its retained state is read back)."""
+        if self.clips and not self._refetch_hours_known:
+            self._refetch_hours_known = True
+            self.pub(self.refetch_hours_topic, str(self.refetch_hours))
+
+    def _on_refetch(self, client, userdata, msg) -> None:
+        """The "Re-fetch clips" button, or a number of hours from an automation."""
+        if not self.clips:
+            return
+        if self.refetching:
+            LOG.info("A clip re-fetch is already running")
+            return
+        self.refetching = True
+        hours = hours_from(msg.payload, self.refetch_hours)
+        threading.Thread(target=self.refetch_clips, args=(hours,), daemon=True).start()
+
+    def refetch_clips(self, hours: int) -> dict[str, int] | None:
+        """Make the saved clips of the last few hours again where the cloud now has more video."""
+        try:
+            with self.lock:
+                now = time.time()
+                start = now - hours * 3600
+                LOG.info("Re-fetching the clips of the last %d hour(s)", hours)
+                try:
+                    events = self.api.events(start, now)
+                except (VicohomeError, requests.RequestException, ValueError) as err:
+                    LOG.warning("Clip re-fetch failed: %s", err)
+                    return None
+                self.tracker.refresh(events)
+                urls = {e.trace_id: e.video_url for e in events}
+                visits = [(r["trace_id"], urls.get(r["trace_id"], ""))
+                          for r in self.tracker.newest(self.budget.cap) if r["timestamp"] >= start]
+                counts = self.clips.refetch(visits)
+                self.last_refetch = {"time": datetime.fromtimestamp(now, self.tz).isoformat(timespec="seconds"),
+                                     "hours": hours, **counts}
+                self.publish_clip_storage()
+                return counts
+        except Exception:  # a thread of its own: log the bug, keep the bridge going
+            LOG.exception("Unexpected error during the clip re-fetch")
+            return None
+        finally:
+            self.refetching = False
+
     def publish_clip_storage(self) -> None:
         if not self.clips:
             return
@@ -429,7 +536,8 @@ class Bridge:
             "full_streak": st.get("full_streak", 0), "light_streak": st.get("light_streak", 0),
             "today_visits": self.tracker.daily.get(self.tracker.day_of(time.time()), 0),
             "free_gb": round(free / 1024 ** 3, 1) if free is not None else None,
-            "last_audit": (st.get("audits") or [None])[-1], "audits": (st.get("audits") or [])[-14:]})
+            "last_audit": (st.get("audits") or [None])[-1], "audits": (st.get("audits") or [])[-14:],
+            "last_refetch": self.last_refetch})
 
     # ---- images ---------------------------------------------------------
     def _fetch_image(self, rec: dict[str, Any]) -> tuple[bytes, str] | None:
@@ -554,13 +662,13 @@ class Bridge:
                          f" ({ev.confidence:.0f}%)" if ev.confidence else "", rec["time"])
                 self.handle_image(rec, publish=True)
                 self.publish_live_event(rec)
-                if self.clips:
+                if self.clips and self.opts.get("clip_source", "cloud_first") != "sd_only":
                     self.clips.queue(ev.serial, ev.trace_id, rec.get("video_url", ""),  # made at the end of the poll
                                      rec.get("period"), rec["timestamp"])
         if bootstrap:
             for serial, rec in newest.items():  # show the newest picture once, no event/motion
                 self.handle_image(rec, publish=True)
-        if self.clips:  # make sure the recent visits have clips (first start, or after an upgrade)
+        if self.clips and self.opts.get("clip_source", "cloud_first") != "sd_only":  # cloud clips for recent visits
             for serial in self.tracker.cameras:
                 for rec in self.tracker.recent(serial, min(RECENT_IN_ATTRIBUTES, self.budget.cap)):
                     if not rec.get("clip_url"):
@@ -596,7 +704,9 @@ class Bridge:
         while not self.stop.is_set():
             wait = interval
             try:
-                self.poll()
+                with self.lock:
+                    self.poll()
+                self.publish_refetch_hours()  # after the first poll: the retained value has arrived by now
                 failures = 0
                 self.last_error = ""
                 self.last_ok = time.time()

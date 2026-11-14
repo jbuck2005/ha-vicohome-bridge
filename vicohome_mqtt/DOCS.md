@@ -36,7 +36,8 @@ over MQTT (with discovery). Needs the Mosquitto broker add-on and the MQTT integ
 | `retention_days` | 30 | Delete saved snapshots older than this (0 = keep forever). |
 | `motion_seconds` | 60 | How long the motion sensor stays on. |
 | `save_clips` | true | Turn each visit's clip into an MP4 in `/config/www/<clip_folder>/`, linked as `clip_url` (`/local/...`). |
-| `clip_source` | cloud_first | `cloud_first`: if a cloud clip is incomplete and the camera has a microSD card, pull the full recording off the card over WebRTC on the LAN. `cloud_only`: never use the card. |
+| `clip_source` | cloud_first | `cloud_first`: cloud, falling back to the SD card when a cloud clip is incomplete. `sd_only`: always from the SD card (the cloud is still used for events and snapshots). `cloud_only`: never use the card. |
+| `sd_fetch_hours` | 1 | How often the camera may be woken to pull SD clips (1-24 h). Higher = fewer wakes, longer battery life, later SD clips. No effect with `cloud_only`. |
 | `clips_to_keep` | 60 | Starting AND minimum clip limit (newest N clips kept, about 3 MB each). |
 | `clips_max` | 600 | The limit never grows past this. |
 | `clip_folder` | vicohome | Folder under `/config/www`. |
@@ -59,14 +60,24 @@ Note: Home Assistant serves `/config/www` at `/local/` **without a login**. File
 visit's random trace id, so they can't be guessed, but anyone given a link can open it.
 Clips are also included in Home Assistant backups (another reason only the newest N are kept).
 
-### SD-card backfill
+### SD card as a clip source
 Battery cameras sometimes upload only the first seconds of a clip when the link is poor, but keep the whole
-recording on their microSD card. With `clip_source: cloud_first` (the default), when the cloud marks a visit
-incomplete and the camera has a card, the bridge fetches the full recording from the card over a WebRTC
-data-channel link on the local network (the same path the app uses) and replaces the short clip. Each fetch
-wakes the camera and briefly signs the phone app out (a camera serves one live session at a time), so it runs
-only for incomplete clips, a few per hour at most. Set `clip_source: cloud_only` to turn it off. The add-on
-runs on the host network for the peer-to-peer link, so the Home Assistant host must be on the camera's LAN.
+recording on their microSD card. The bridge can read that card over a WebRTC data-channel link on the local
+network (the same path the app uses). `clip_source` chooses how it is used:
+
+- **`cloud_first`** (default): clips come from the cloud; when the cloud marks a visit incomplete and the camera
+  has a card, the bridge pulls the full recording from the card and replaces the short clip.
+- **`sd_only`**: clips always come from the card. The cloud is still polled for the bird events and snapshots,
+  but the clip video is taken from the card. A clip appears after the next SD fetch window rather than right
+  away. If the camera has no card, no clips are saved (use `cloud_first` instead).
+- **`cloud_only`**: the card is never touched.
+
+**Battery note.** Every SD fetch *wakes the camera* (and briefly signs the phone app out — a camera serves one
+live session at a time), so it costs battery. `sd_fetch_hours` (1-24, default 1) sets how often the camera may
+be woken for SD clips: **a low value wakes it often and can noticeably shorten a battery camera's run time**, a
+higher value is gentler but makes SD-sourced clips appear later. Each wake pulls up to a few clips at once, and
+`cloud_first` only wakes the camera when a clip is actually incomplete. The add-on runs on the host network for
+the peer-to-peer link, so the Home Assistant host must be on the camera's LAN.
 
 ### Self-sizing clip limit (daily audit)
 Just after local midnight the bridge audits the previous day (only days it saw completely):
@@ -77,6 +88,15 @@ Just after local midnight the bridge audits the previous day (only days it saw c
   (never below `clips_to_keep`).
 `sensor.<cam>_clip_storage` (MB) carries count, limit, streaks, free space and the last 14 audits;
 `sensor.<cam>_clip_limit` is the current limit.
+
+### Re-fetching clips
+`button.<cam>_re_fetch_clips` looks again at the saved clips of the last `number.<cam>_re_fetch_hours`
+hours (default 2, up to 24). For each one it compares the MP4's length with the cloud's playlist and
+makes the MP4 again, under the same name, when the cloud now has more video. Only clips still on disk
+are looked at, so the clip limit holds. The log gets one line, e.g. `Re-fetched clips: checked 12,
+re-made 9, unchanged 2, gone from the cloud 1`, and the same counts are in the `last_refetch`
+attribute of `sensor.<cam>_clip_storage`.
+An automation can also publish a number of hours to `<base_topic>/clips/refetch`, e.g. `6`.
 
 ## How it differs from the original vicohome-bridge add-on
 - Only **new** events are published, oldest first, so "last" is always the newest visit

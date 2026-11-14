@@ -26,6 +26,18 @@ Or by hand: Settings -> Add-ons -> Add-on store -> ... -> Repositories -> add th
 URL, then install **Vicohome MQTT Bridge**. Or copy `vicohome_mqtt/` into the `/addons` (local
 add-ons) folder and reload the store.
 
+### Edge (every merged change, before a release)
+Changes are merged into the `edge` branch first and reach `main` as a release. To run them
+before that, add the repository with `#edge` on the end:
+`https://github.com/jbuck2005/ha-vicohome-bridge#edge`
+
+[![Open your Home Assistant instance and show the add add-on repository dialog with the edge branch pre-filled.](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fjbuck2005%2Fha-vicohome-bridge%23edge)
+
+Home Assistant shows it as a second **Vicohome MQTT Bridge** with a version like `0.4.2-dev.2`,
+and offers an update after each merge. It is a separate add-on with its own options and state:
+copy the options over, and stop the other one first (only one bridge per Vicohome account).
+It publishes the same MQTT topics and entities, so dashboards and automations keep working.
+
 This project has no connection with Vicohome. The dashboard assumes a camera named "Bird Cam": replace `bird_cam` with
 your camera's name.
 

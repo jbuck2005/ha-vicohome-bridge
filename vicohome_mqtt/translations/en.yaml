@@ -32,6 +32,18 @@ configuration:
   motion_seconds:
     name: Motion duration
     description: Seconds the motion sensor stays on after a new visit.
+  clip_source:
+    name: Clip source
+    description: >-
+      Where clips come from. cloud_first: the cloud, falling back to the camera's SD card when the cloud
+      uploaded only part of a clip. sd_only: always from the SD card (the cloud is still used for the
+      bird events and snapshots). cloud_only: the cloud only, never the card.
+  sd_fetch_hours:
+    name: SD fetch interval (hours)
+    description: >-
+      How often the bridge may wake the camera to pull clips from its SD card (cloud_first and sd_only).
+      A smaller number wakes the camera more often and can shorten a battery camera's run time; a larger
+      number is gentler but makes SD-sourced clips appear later. No effect with cloud_only.
   save_clips:
     name: Save clips
     description: Turn each visit's clip into an MP4 under /config/www, linked as clip_url. Files there are served without a login.
