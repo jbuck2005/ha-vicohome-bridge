@@ -16,12 +16,12 @@ between sessions. It is never merged into `main` or `edge`.
   architectures. Dependabot then closed #18 itself.
 - #24: version 0.4.2, with the changelog and RELEASES.md notes.
 
-**Status.** Release PR #25 (`edge` into `main`) is open with all checks green. Merging it puts 0.4.2 in the
-add-on store, and the workflow drafts `v0.4.2` without publishing.
+**Status.** #25 is merged into `main` with a merge commit, so `main` has the same files as `edge`, and 0.4.2 is
+in the add-on store. The Release workflow drafted `v0.4.2` with no hold note.
 
 **Next.**
-- Merge #25 with a merge commit, not a squash, so `edge` and `main` stay in step.
 - Review the draft under Releases and press Publish. That creates the tag, and today is still free.
+- Fix the v0.3.5 release notes, which show a raw `sed` command instead of the changelog.
 
 ---
 
