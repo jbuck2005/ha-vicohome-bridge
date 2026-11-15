@@ -1,6 +1,11 @@
 # Changelog
 
 ## Unreleased
+- New option **`visit_source`**: `cloud` (default) or **`sd_poll`**. With `sd_poll` the bridge learns about
+  visits by reading the camera's microSD card every **`sd_poll_minutes`** (15-1440, default 60) instead of the
+  cloud's event list. Each new recording becomes a visit with its clip and a snapshot frame from the card, but
+  no species. Each read wakes the camera, so short intervals cost battery. The cloud is still used to log in,
+  list devices and open the local link.
 - SD backfill gives each recording on the card to one visit only. When two visits fell inside one long
   recording, both got the same file, so one recording showed up as two visits with the same video. The
   recording now goes to the visit that started closest to it, and the other visit keeps its cloud clip.

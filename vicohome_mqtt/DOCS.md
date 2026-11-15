@@ -38,6 +38,8 @@ over MQTT (with discovery). Needs the Mosquitto broker add-on and the MQTT integ
 | `save_clips` | true | Turn each visit's clip into an MP4 in `/config/www/<clip_folder>/`, linked as `clip_url` (`/local/...`). |
 | `clip_source` | cloud_first | `cloud_first`: cloud, falling back to the SD card when a cloud clip is incomplete. `sd_only`: always from the SD card (the cloud is still used for events and snapshots). `cloud_only`: never use the card. |
 | `sd_fetch_hours` | 1 | How often the camera may be woken to pull SD clips (1-24 h). Higher = fewer wakes, longer battery life, later SD clips. No effect with `cloud_only`. |
+| `visit_source` | cloud | `cloud`: visits come from the cloud's event list, with species. `sd_poll`: the bridge reads the camera's SD card every `sd_poll_minutes` and each new recording is a visit, with its clip and snapshot from the card but no species. See below. |
+| `sd_poll_minutes` | 60 | With `sd_poll`, minutes between card reads (15-1440). Each read wakes the camera. |
 | `clips_to_keep` | 60 | Starting AND minimum clip limit (newest N clips kept, about 3 MB each). |
 | `clips_max` | 600 | The limit never grows past this. |
 | `clip_folder` | vicohome | Folder under `/config/www`. |
@@ -45,6 +47,23 @@ over MQTT (with discovery). Needs the Mosquitto broker add-on and the MQTT integ
 | `discovery_prefix` | homeassistant | Home Assistant's MQTT discovery prefix. |
 | `log_level` | info | `debug`, `info`, `warning` or `error`. |
 | `mqtt_host`, `mqtt_port`, `mqtt_username`, `mqtt_password` | (Supervisor) | Only needed for an external broker. |
+
+## Visits from the SD card (`visit_source: sd_poll`)
+With `sd_poll` the bridge stops asking the cloud which visits happened. Every `sd_poll_minutes` it opens the same
+local WebRTC link as the SD clip fetch, lists the recordings the camera made since the last read, and treats each
+new one as a visit: it pulls the MP4, takes a snapshot frame from it, and fires the usual event and motion
+entities. Clips always come from the card in this mode, whatever `clip_source` says.
+
+- **No species.** The card has no AI results, so these visits are "Unidentified".
+- **Late.** A visit shows up at the next read, up to `sd_poll_minutes` after it happened. Its `time` is the real
+  visit time. A recording that started in the last 90 seconds waits for the following read.
+- **Battery.** Each read wakes the camera for about half a minute and signs the phone app out of live view while
+  it runs. The floor is 15 minutes and the default 60; the log warns below 30. At 15 minutes that is about 100
+  extra wakes a day.
+- **Still uses the cloud** for the account login, the device list, and to open the link (the WebRTC ticket and
+  signalling). Only the media goes over your LAN. This is a step towards a local-only bridge, not the end of it.
+- When you switch an existing install to `sd_poll`, recordings that match a visit the cloud already listed are
+  not counted twice. The first read loads `bootstrap_hours` of history without firing events.
 
 ## Clips
 Vicohome serves clips as HLS playlists (`.m3u8`) whose segments are signed cloud links that
