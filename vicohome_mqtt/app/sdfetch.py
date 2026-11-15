@@ -394,6 +394,26 @@ def _match(seg: list[dict], vts: float) -> dict | None:
     return min(pool, key=lambda s: abs(s["timestamp"] - vts)) if pool else None
 
 
+def assign_segments(seg: list[dict], visits: list[tuple]) -> tuple[dict[str, list], int]:
+    """Map SD recording name -> [trace] with each recording given to at most one visit, and count the
+    visits left out because their recording went to another visit.
+
+    Two visits can fall inside one long recording (the camera keeps recording while something keeps
+    moving). Giving that file to both would make two visits out of one recording, so it goes only to the
+    visit that started closest to it; the other keeps whatever clip the cloud gave it."""
+    best: dict[str, tuple] = {}
+    matched = 0
+    for trace, vts in visits:
+        m = _match(seg, vts)
+        if not m or (m.get("period") or 0) < 3:
+            continue
+        matched += 1
+        gap = abs(m["timestamp"] - vts)
+        if m["name"] not in best or gap < best[m["name"]][1]:
+            best[m["name"]] = (trace, gap)
+    return {name: [trace] for name, (trace, _) in best.items()}, matched - len(best)
+
+
 async def _run(api, serial: str, visits: list[tuple], iface_ip, per_clip_s, log) -> dict:
     t = _Tunnel(api, serial, iface_ip, log)
     out: dict = {}
@@ -404,17 +424,15 @@ async def _run(api, serial: str, visits: list[tuple], iface_ip, per_clip_s, log)
         hi = max(v[1] for v in visits) + 60
         seg = await t.list_segments(lo, hi)
         log.info("sdfetch: camera lists %d SD segments for the window", len(seg))
-        want: dict[str, list] = {}
-        for trace, vts in visits:
-            m = _match(seg, vts)
-            if m and (m.get("period") or 0) >= 3:
-                want.setdefault(m["name"], []).append(trace)
+        want, shared = assign_segments(seg, visits)
+        if shared:
+            log.info("sdfetch: %d visit(s) share a recording with a closer visit; they keep their cloud clip", shared)
         for name, traces in want.items():
             data = await t.fetch(name, per_clip_s)
             if data:
                 for trace in traces:
                     out[trace] = data
-                log.info("sdfetch: pulled %s (%d bytes) for %d visit(s)", name, len(data), len(traces))
+                log.info("sdfetch: pulled %s (%d bytes)", name, len(data))
             else:
                 log.warning("sdfetch: no data for %s", name)
     finally:
