@@ -20,7 +20,7 @@ inside one long recording would both get the same file.
 
 **Status.** Merged into `edge` on 2026-11-15.
 
-**Next.** Merged into edge. If #21 (sd_poll) goes in first, rebase this one and bump to the next dev number.
+**Next.** #21 (sd_poll) now needs a rebase and the next dev number, because this took 0.4.2-dev.2.
 `_sd_known` in #21 already skips recordings that a cloud visit covers, so cloud plus SD poll doesn't double up.
 
 ---
