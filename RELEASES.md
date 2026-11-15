@@ -29,6 +29,26 @@ Releasing, step by step:
 
 ---
 
+## 0.4.2 — 2026-11-15
+
+This release lets the camera's microSD card stand in for the cloud's visit list, and tidies up how card
+recordings and clip logs line up with visits.
+
+**Visits from the SD card.** A new option, `visit_source`, is `cloud` by default. Set to **`sd_poll`**, the
+bridge learns about visits by reading the camera's card every **`sd_poll_minutes`** (15-1440, default 60) instead
+of the cloud's event list. Each new recording becomes a visit with its clip and a snapshot frame from the card,
+but no species name. Every read wakes the camera, so a short interval costs battery. The cloud is still used to
+log in, list devices and open the local link.
+
+**One card recording per visit.** When two visits fell inside one long recording, both were given the same file,
+so one recording showed up as two visits with the same video. The recording now goes to the visit that started
+closest to it, and the other visit keeps its cloud clip.
+
+**Clearer clip logs.** `Saved clip` now names the visit it belongs to, and `Removed old clip(s)` says how many
+clips are kept, so the clip limit dropping the oldest file no longer looks like a lost new clip.
+
+**Python 3.15.** The add-on image moves from Python 3.12 to 3.15, and CI tests on 3.15 to match.
+
 ## 0.4.1 — 2026-11-14
 
 Today's release bundles three things: a manual complement to the automatic clip recovery, the edge channel for trying changes before release, and the SD card as a first-class clip source.
@@ -85,5 +105,5 @@ full list (0.1.0 through 0.3.2).
 
 ---
 
-Note: releases 0.3.3–0.3.5 are tagged on GitHub; 0.3.6 and 0.4.0 were tagged when this release log was added,
-and 0.4.1 is still to be tagged. Releases before 0.3.3 were not tagged.
+Note: releases 0.3.3–0.3.5 are tagged on GitHub; 0.3.6 and 0.4.0 were tagged when this release log was added.
+0.4.1 shipped from `main` without a tag. Releases before 0.3.3 were not tagged.

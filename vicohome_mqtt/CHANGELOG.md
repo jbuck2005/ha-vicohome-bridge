@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.2
 - The add-on now runs on Python 3.15 (was 3.12), and CI tests on 3.15 to match.
 - New option **`visit_source`**: `cloud` (default) or **`sd_poll`**. With `sd_poll` the bridge learns about
   visits by reading the camera's microSD card every **`sd_poll_minutes`** (15-1440, default 60) instead of the
