@@ -228,7 +228,7 @@ class ClipMaker:
             if last is None or size != last or self._short_of_period(job):
                 LOG.debug("Clip %s may still be growing (%d segments, %.1f s)", trace_id, *size)
                 return False
-        if not self._remux(trace_id, text):
+        if not self._remux(trace_id, text, visit_ts=job["visit"]):
             return False
         now = self.clock()
         self.saved[trace_id] = (job["serial"], size[1])
@@ -299,7 +299,7 @@ class ClipMaker:
                  f", failed {counts['failed']}" if counts["failed"] else "")
         return counts
 
-    def _remux(self, trace_id: str, text: str) -> bool:
+    def _remux(self, trace_id: str, text: str, visit_ts: float | None = None) -> bool:
         self.folder.mkdir(parents=True, exist_ok=True)
         final = self.folder / clip_name(trace_id)
         tmp_out = self.folder / f".{trace_id}.part.mp4"
@@ -319,8 +319,11 @@ class ClipMaker:
                 tmp_out.unlink(missing_ok=True)
                 return False
             os.replace(tmp_out, final)
-            LOG.info("Saved clip %s (%d kB, %.1f s)", final.name, final.stat().st_size // 1024,
-                     playlist_size(text)[1])
+            # A fresh visit's clip is saved a poll or two after its event line, often after the next
+            # visit's lines, so name the visit it belongs to.
+            visit = f" for the visit at {time.strftime('%H:%M:%S', time.localtime(visit_ts))}" if visit_ts else ""
+            LOG.info("Saved clip %s (%d kB, %.1f s)%s", final.name, final.stat().st_size // 1024,
+                     playlist_size(text)[1], visit)
             return True
         except (subprocess.TimeoutExpired, OSError) as err:
             LOG.warning("Clip %s failed: %s", trace_id, err.__class__.__name__)

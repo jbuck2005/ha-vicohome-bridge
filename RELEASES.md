@@ -11,8 +11,43 @@ How versions move (since 0.4.1):
   offers an update after each merge, so new work can be tried before it is released.
 - A release promotes `edge` into `main`: the version loses its `-dev.N` suffix and the changelog's pending notes
   are renamed to the version. The add-on store (and HA's update button) then offers the new release.
+- Merging the release into `main` drafts a GitHub Release for `v<version>` with that version's changelog notes
+  (`.github/workflows/release.yml`). Nothing is published automatically: the maintainer reviews the draft and
+  presses **Publish**, which creates the tag.
+- At most one release a day, counted in the time zone of the `RELEASE_TZ` repository variable (UTC when unset).
+  A release's day is when it was published (or an annotated tag's tagger date), not the tag's git date. If a
+  release was already made that day, the draft says when it may be published, and a second release or hand-pushed
+  tag on the same day fails the Release workflow.
+
+Releasing, step by step:
+
+1. Open a PR from `edge` into `main` that sets the plain version (`0.4.2`) in `vicohome_mqtt/config.yaml` and
+   `VERSION` in `bridge.py`, renames `## Unreleased` in the changelog to it, and adds a section here.
+2. Merge it. The Release workflow drafts `v0.4.2`.
+3. Check the draft under Releases and publish it (on another day if it says to hold).
+4. On `edge`, the next change starts the following edge build (`0.4.3-dev.1`).
 
 ---
+
+## 0.4.2 — 2026-11-15
+
+This release lets the camera's microSD card stand in for the cloud's visit list, and tidies up how card
+recordings and clip logs line up with visits.
+
+**Visits from the SD card.** A new option, `visit_source`, is `cloud` by default. Set to **`sd_poll`**, the
+bridge learns about visits by reading the camera's card every **`sd_poll_minutes`** (15-1440, default 60) instead
+of the cloud's event list. Each new recording becomes a visit with its clip and a snapshot frame from the card,
+but no species name. Every read wakes the camera, so a short interval costs battery. The cloud is still used to
+log in, list devices and open the local link.
+
+**One card recording per visit.** When two visits fell inside one long recording, both were given the same file,
+so one recording showed up as two visits with the same video. The recording now goes to the visit that started
+closest to it, and the other visit keeps its cloud clip.
+
+**Clearer clip logs.** `Saved clip` now names the visit it belongs to, and `Removed old clip(s)` says how many
+clips are kept, so the clip limit dropping the oldest file no longer looks like a lost new clip.
+
+**Python 3.15.** The add-on image moves from Python 3.12 to 3.15, and CI tests on 3.15 to match.
 
 ## 0.4.1 — 2026-11-14
 
@@ -70,5 +105,5 @@ full list (0.1.0 through 0.3.2).
 
 ---
 
-Note: releases 0.3.3–0.3.5 are tagged on GitHub; 0.3.6, 0.4.0 and 0.4.1 were tagged when this release log was
-added. Releases before 0.3.3 were not tagged.
+Note: releases 0.3.3–0.3.5 are tagged on GitHub; 0.3.6 and 0.4.0 were tagged when this release log was added.
+0.4.1 shipped from `main` without a tag. Releases before 0.3.3 were not tagged.

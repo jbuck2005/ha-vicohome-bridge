@@ -394,6 +394,26 @@ def _match(seg: list[dict], vts: float) -> dict | None:
     return min(pool, key=lambda s: abs(s["timestamp"] - vts)) if pool else None
 
 
+def assign_segments(seg: list[dict], visits: list[tuple]) -> tuple[dict[str, list], int]:
+    """Map SD recording name -> [trace] with each recording given to at most one visit, and count the
+    visits left out because their recording went to another visit.
+
+    Two visits can fall inside one long recording (the camera keeps recording while something keeps
+    moving). Giving that file to both would make two visits out of one recording, so it goes only to the
+    visit that started closest to it; the other keeps whatever clip the cloud gave it."""
+    best: dict[str, tuple] = {}
+    matched = 0
+    for trace, vts in visits:
+        m = _match(seg, vts)
+        if not m or (m.get("period") or 0) < 3:
+            continue
+        matched += 1
+        gap = abs(m["timestamp"] - vts)
+        if m["name"] not in best or gap < best[m["name"]][1]:
+            best[m["name"]] = (trace, gap)
+    return {name: [trace] for name, (trace, _) in best.items()}, matched - len(best)
+
+
 async def _run(api, serial: str, visits: list[tuple], iface_ip, per_clip_s, log) -> dict:
     t = _Tunnel(api, serial, iface_ip, log)
     out: dict = {}
@@ -404,22 +424,56 @@ async def _run(api, serial: str, visits: list[tuple], iface_ip, per_clip_s, log)
         hi = max(v[1] for v in visits) + 60
         seg = await t.list_segments(lo, hi)
         log.info("sdfetch: camera lists %d SD segments for the window", len(seg))
-        want: dict[str, list] = {}
-        for trace, vts in visits:
-            m = _match(seg, vts)
-            if m and (m.get("period") or 0) >= 3:
-                want.setdefault(m["name"], []).append(trace)
+        want, shared = assign_segments(seg, visits)
+        if shared:
+            log.info("sdfetch: %d visit(s) share a recording with a closer visit; they keep their cloud clip", shared)
         for name, traces in want.items():
             data = await t.fetch(name, per_clip_s)
             if data:
                 for trace in traces:
                     out[trace] = data
-                log.info("sdfetch: pulled %s (%d bytes) for %d visit(s)", name, len(data), len(traces))
+                log.info("sdfetch: pulled %s (%d bytes)", name, len(data))
             else:
                 log.warning("sdfetch: no data for %s", name)
     finally:
         await t.close()
     return out
+
+
+async def _poll(api, serial: str, start: float, stop: float, known, max_fetch: int,
+                iface_ip, per_clip_s, log) -> list[dict]:
+    t = _Tunnel(api, serial, iface_ip, log)
+    try:
+        await t.connect()
+        await t.prepare()
+        seg = [s for s in await t.list_segments(start, stop)
+               if s.get("timestamp") and (s.get("period") or 0) >= 3 and not known(s)]
+        seg.sort(key=lambda s: s["timestamp"], reverse=True)   # newest first: they matter most
+        log.info("sdpoll: camera lists %d new SD recording(s) since the last poll", len(seg))
+        for s in seg[:max_fetch]:
+            s["data"] = await t.fetch(s["name"], per_clip_s)
+            if not s["data"]:
+                log.warning("sdpoll: no data for %s", s["name"])
+        return sorted(seg, key=lambda s: s["timestamp"])
+    finally:
+        await t.close()
+
+
+def poll_sd_recordings(api, serial: str, start: float, stop: float, known=lambda seg: False,
+                       max_fetch: int = 30, iface_ip: str | None = None, per_clip_s: float = 90,
+                       log: logging.Logger = LOG) -> list[dict] | None:
+    """List the camera's SD recordings in [start, stop] that ``known(segment)`` does not already know.
+
+    Each is a motion recording, so each is a visit. Returns them oldest first as dicts with name,
+    timestamp, period and, for the newest ``max_fetch``, the MP4 bytes as "data" (None if the fetch
+    failed). One WebRTC session (one camera wake). Returns None if the session could not be opened, so
+    the caller can try the same window again.
+    """
+    try:
+        return asyncio.run(_poll(api, serial, start, stop, known, max_fetch, iface_ip, per_clip_s, log))
+    except Exception as err:
+        log.warning("sdpoll: session failed: %s", err)
+        return None
 
 
 def fetch_sd_clips(api, serial: str, visits: list[tuple], iface_ip: str | None = None,
