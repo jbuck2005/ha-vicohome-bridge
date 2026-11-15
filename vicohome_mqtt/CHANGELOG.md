@@ -1,6 +1,9 @@
 # Changelog
 
 ## Unreleased
+- SD backfill gives each recording on the card to one visit only. When two visits fell inside one long
+  recording, both got the same file, so one recording showed up as two visits with the same video. The
+  recording now goes to the visit that started closest to it, and the other visit keeps its cloud clip.
 - Clearer clip log lines. A new visit's clip is saved a poll or two after its event line, so in the log it
   often sits under the next visit's lines and looked like it belonged to that one. `Saved clip` now names
   the visit it is for (`... for the visit at 09:04:00`), and `Removed old clip(s)` says how many clips are
