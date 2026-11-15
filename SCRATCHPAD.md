@@ -18,7 +18,9 @@ inside one long recording would both get the same file.
   clip, and the log says how many were left out.
 - `pytest tests`: 66 passed.
 
-**Next.** Merge into edge. If #21 (sd_poll) goes in first, rebase this one and bump to the next dev number.
+**Status.** Merged into `edge` on 2026-11-15.
+
+**Next.** Merged into edge. If #21 (sd_poll) goes in first, rebase this one and bump to the next dev number.
 `_sd_known` in #21 already skips recordings that a cloud visit covers, so cloud plus SD poll doesn't double up.
 
 ---
