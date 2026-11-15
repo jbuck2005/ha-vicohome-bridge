@@ -5,6 +5,26 @@ between sessions. It is never merged into `main` or `edge`.
 
 ---
 
+## 2026-11-15: 0.4.2 prepared
+
+**What changed.** I merged everything that was waiting into `edge` and set it to 0.4.2:
+- #22: each SD card recording goes to one visit only.
+- #21: visits from the SD card (`visit_source: sd_poll`). I merged `edge` into it, fixed the
+  version and changelog conflicts, and bumped it to 0.4.2-dev.3.
+- #23: Python 3.15, replacing Dependabot's #18, which was built on old history and conflicted.
+  The requirements install and the tests pass on 3.15, and the image builds on both
+  architectures. Dependabot then closed #18 itself.
+- #24: version 0.4.2, with the changelog and RELEASES.md notes.
+
+**Status.** Release PR #25 (`edge` into `main`) is open with all checks green. Merging it puts 0.4.2 in the
+add-on store, and the workflow drafts `v0.4.2` without publishing.
+
+**Next.**
+- Merge #25 with a merge commit, not a squash, so `edge` and `main` stay in step.
+- Review the draft under Releases and press Publish. That creates the tag, and today is still free.
+
+---
+
 ## 2026-11-14: SD backfill could give one recording to two visits (PR #22)
 
 **What I checked.** I was worried the SD card path was double counting. It wasn't, in the cases I saw: every
