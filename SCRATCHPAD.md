@@ -5,6 +5,20 @@ between sessions. It is never merged into `main` or `edge`.
 
 ---
 
+## 2026-11-18: Review fixes (PR #26 into edge, 0.4.3-dev.1)
+
+**Changed:** the ICE interface filter is patched once, so SD polls no longer die of a RecursionError after about
+a thousand wakes. SD visit ids are keyed with a random secret in `/data/sd_key`, so clip names under `/local/`
+can't be guessed (old ids are still recognised). The token only goes to the API hosts over HTTPS. A 502 page
+no longer forces a re-login. SD downloads parse incrementally, and a full disk skips one clip. 89 tests and the
+e2e test pass, and CI is green.
+
+**Status:** #26 open and green, waiting on my merge.
+
+**Next:** merge #26, let the edge add-on update on HA, and watch one SD poll in the log.
+
+---
+
 ## 2026-11-18: Health review of both repos
 
 **Checked:** branches, edge vs main, open PRs and issues, CI runs, and the code. Tests pass (77). CI is green.
