@@ -5,6 +5,34 @@ between sessions. It is never merged into `main` or `edge`.
 
 ---
 
+## 2026-11-18: Health review of both repos
+
+**Checked:** branches, edge vs main, open PRs and issues, CI runs, and the code. Tests pass (77). CI is green.
+`main` = `edge` = 0.4.2. No open PRs or issues.
+
+**Found:**
+- High: `sdfetch` wraps `aioice.ice.get_host_addresses` on every camera connect and never puts it back.
+  The wrappers stack up, and after about 1,000 connects ICE gathering hits a RecursionError, so SD polls and
+  backfills start failing until the add-on restarts. With `sd_poll` every 15 min that is about 10 days.
+  I reproduced the RecursionError in a quick script.
+- High (privacy): SD-poll clips are named `sd-<6 hex>-<epoch>.mp4` under `/local/`, which needs no login. The
+  6 hex never change for a camera, so anyone who has seen one link can guess the rest by trying timestamps.
+  DOCS.md says the names can't be guessed. Cloud trace ids also contain the visit's epoch, so check how
+  much randomness they really have.
+- Medium: the API token goes on any URL that merely contains `vicohome.io` or `vicoo.tech`, not only on those
+  hosts.
+- Medium: `sdfetch._collected()` re-joins and re-parses the whole receive buffer every 0.3 s while a clip
+  downloads (quadratic CPU on the HA box).
+- Low: a non-JSON reply (an HTML 502 page) counts as a login error and triggers a re-login.
+- Low: `sd_backfill` writes the clip without catching OSError (a full disk aborts the rest of the poll).
+- A stray `claude/project-thread-7ted09` branch is on the remote again. I need to delete it by hand.
+
+**Status:** report only, no code changed. Waiting on me to pick what to fix.
+
+**Next:** fix PRs into `edge` (0.4.3-dev.1) for whatever I pick, starting with the two High items.
+
+---
+
 ## 2026-11-15: 0.4.2 prepared
 
 **What changed.** I merged everything that was waiting into `edge` and set it to 0.4.2:
