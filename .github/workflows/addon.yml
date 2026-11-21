@@ -99,9 +99,9 @@ jobs:
           "$RUNNER_TEMP/cam-venv/bin/pip" install -q "$(grep -E '^aiortc==' vicohome_mqtt/requirements.txt)"
       - name: Run the add-on's mounts and checks under the profile
         run: |
-          mkdir -p "$RUNNER_TEMP"/{data,media,ha/www}
+          mkdir -p "$RUNNER_TEMP"/{data,media,ha/www,ice}
           # Supervisor's folders are root-owned; root in the container has no DAC override.
-          chmod 777 "$RUNNER_TEMP"/{data,media,ha,ha/www}
+          chmod 777 "$RUNNER_TEMP"/{data,media,ha,ha/www,ice}
           echo "# test" > "$RUNNER_TEMP/ha/configuration.yaml"
           sudo dmesg --clear || true
           run() {
@@ -114,7 +114,6 @@ jobs:
           run python3 /app/tests/apparmor_ice_check.py
           run python3 /app/tests/e2e_fake_cloud.py
           # The SD card link without host networking: ICE through the host's NAT to the camera.
-          mkdir -m 777 "$RUNNER_TEMP/ice"
           sudo ip netns exec cam timeout 120 "$RUNNER_TEMP/cam-venv/bin/python" tests/nat_ice_check.py camera "$RUNNER_TEMP/ice" &
           run python3 /app/tests/nat_ice_check.py bridge /ice
           wait
