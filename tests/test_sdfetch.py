@@ -356,3 +356,13 @@ def test_send_audio_option():
     bridge.sd_tuning({"sd_send_audio": False})
     assert sdfetch.SEND_AUDIO[0] is False
     bridge.sd_tuning({})
+
+
+def test_peer_out_from_another_viewer_is_ignored():
+    f = sdfetch._peer_out_is_camera
+    assert f({"method": "PEER_OUT", "senderClientId": "CAM1"}, "CAM1", False)        # the camera left
+    assert not f({"method": "PEER_OUT", "senderClientId": "phone-42"}, "CAM1", True)  # another viewer
+    assert not f({"method": "PEER_OUT"}, "CAM1", False)   # nobody named, before the link: the phone app
+    assert f({"method": "PEER_OUT"}, "CAM1", True)        # nobody named, link up: treat as the camera
+    # the group (named after the camera) and our own id as recipient don't say who left
+    assert not f({"method": "PEER_OUT", "groupId": "CAM1", "recipientClientId": "me", "name": "phone"}, "CAM1", True)
