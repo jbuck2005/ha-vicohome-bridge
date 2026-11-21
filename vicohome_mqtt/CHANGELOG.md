@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- The SD link sends its silent audio stream again by default (0.4.3-dev.18): without it, the camera never
+  answered the card listing. `sd_send_audio` is now on by default.
 - SD link no longer sends the camera a silent audio stream (0.4.3-dev.17). It still offers two-way audio
   like the phone app but sends nothing, which cuts our packets to the camera to about a quarter. In every
   stall so far, the camera first stopped answering our checks while still sending its own, and then
