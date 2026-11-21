@@ -206,6 +206,8 @@ class _Tunnel:
                 break
             pl = bytes(raw[j + 12:j + 12 + ln])
             j += 12 + ln
+            if self.log.isEnabledFor(logging.DEBUG):
+                self.log.debug("sdfetch frame: type %#x stream %d flags %d length %d", typ, sid, fl, ln)
             d = self._streams.setdefault(sid, {"status": None, "body": bytearray(), "end": False})
             if typ == 0x1A:
                 d["end"] = True
@@ -231,6 +233,8 @@ class _Tunnel:
             d = self._collected().get(sid)
             if d and (d["end"] or (self._declared(d) and len(d["body"]) >= self._declared(d))):
                 return d
+            if self.done is not None and self.done.is_set():
+                break   # the camera ended the session or ICE failed; nothing more will arrive
             if label and time.time() >= next_note:
                 next_note += 10
                 got = len(d["body"]) if d else 0
@@ -288,6 +292,10 @@ class _Tunnel:
             if not dc_open.done():
                 dc_open.set_result(True)
 
+        @self.channel.on("close")
+        def _close():
+            self.log.info("sdfetch: the camera closed the data channel")
+
         @self.channel.on("message")
         def _msg(m):
             self.rx.append(m if isinstance(m, (bytes, bytearray)) else m.encode("utf-8", "replace"))
@@ -326,6 +334,7 @@ class _Tunnel:
 
         async def on_message(msg):
             method, mtype = msg.get("method"), msg.get("messageType")
+            self.log.debug("sdfetch signalling: %s %s", method, mtype or "")
             if method == "AUTH_RESPONSE":
                 if msg.get("code") != 0:
                     self.done.set()
@@ -381,6 +390,7 @@ class _Tunnel:
                 else:
                     pending.append(cand)
             elif method in ("PEER_OUT", "NEED_REAUTH"):
+                self.log.info("sdfetch: the camera ended the session (%s)", method)
                 self.done.set()
 
         async def reader():
@@ -433,7 +443,11 @@ class _Tunnel:
         out = []
         if d and d["body"]:
             try:
-                for it in (json.loads(d["body"].decode()).get("data") or {}).get("list") or []:
+                items = (json.loads(d["body"].decode()).get("data") or {}).get("list") or []
+                if items and isinstance(items[0], dict):
+                    first = items[0]
+                    self.log.debug("sdfetch list: first item has %s; traceId %s", sorted(first), first.get("traceId"))
+                for it in items:
                     tr = it.get("traceId", "")
                     if tr.endswith(".mp4"):
                         out.append({"name": tr.rsplit("/", 1)[-1], "period": it.get("period"), "timestamp": it.get("timestamp")})
