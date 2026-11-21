@@ -352,7 +352,7 @@ def test_deaf_camera_detection(monkeypatch):
 def test_send_audio_option():
     import bridge
     bridge.sd_tuning({})
+    assert sdfetch.SEND_AUDIO[0] is True          # on by default: the camera needs it
+    bridge.sd_tuning({"sd_send_audio": False})
     assert sdfetch.SEND_AUDIO[0] is False
-    bridge.sd_tuning({"sd_send_audio": True})
-    assert sdfetch.SEND_AUDIO[0] is True
     bridge.sd_tuning({})
