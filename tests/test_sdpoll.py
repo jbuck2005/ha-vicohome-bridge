@@ -200,7 +200,7 @@ def test_poll_lists_new_recordings_and_fetches_the_newest(monkeypatch):
             return [{"name": f"{i}.mp4", "timestamp": 1000 + i * 100, "period": 20} for i in range(5)] + \
                    [{"name": "tiny.mp4", "timestamp": 2000, "period": 1}]
 
-        async def fetch(self, name, timeout):
+        async def fetch(self, name, timeout, path=None):
             fetched.append(name)
             return b"mp4:" + name.encode()
 

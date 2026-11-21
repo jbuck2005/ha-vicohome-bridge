@@ -4,7 +4,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "vicohome_mqtt" 
 
 import aioice.ice  # noqa: E402
 import sdfetch  # noqa: E402
-from sdfetch import _match, assign_segments, segment_name, _Tunnel  # noqa: E402
+from sdfetch import _clip_path, _match, _shape, assign_segments, segment_name, _Tunnel  # noqa: E402
 from datetime import timezone, timedelta  # noqa: E402
 
 EST = timezone(timedelta(hours=-5))
@@ -128,3 +128,41 @@ def test_unanswered_consent_checks_keep_the_link_open(monkeypatch):
 
     asyncio.run(run())
     assert not Conn.closed
+
+
+def test_clip_path_prefers_the_cameras_own_local_url():
+    item = {"downloadUrl": "https://127.0.0.1:15000/dc/sd/file/DIR/a.mp4?sn=TESTSERIAL"}
+    assert _clip_path(item, "a.mp4", "TESTSERIAL") == "/dc/sd/file/DIR/a.mp4?sn=TESTSERIAL"
+    assert _clip_path({"videoUrl": "/dc/video/mp4/DIR/a.mp4"}, "a.mp4", "S") == "/dc/video/mp4/DIR/a.mp4"
+
+
+def test_clip_path_ignores_cloud_urls_and_falls_back():
+    item = {"downloadUrl": "https://cloud.example/a.mp4?sig=x", "videoUrl": ""}
+    assert _clip_path(item, "a.mp4", "S") == "/dc/video/mp4/a.mp4?sn=S"
+    assert _clip_path({}, "a.mp4", "S") == "/dc/video/mp4/a.mp4?sn=S"
+
+
+def test_shape_masks_serial_and_digits():
+    assert _shape("/dc/x/2026-01-02.mp4?sn=TESTSERIAL", "TESTSERIAL") == "/dc/x/####-##-##.mp4?sn=<serial>"
+
+
+def test_gives_up_when_the_camera_stops_acknowledging(monkeypatch):
+    import asyncio
+    import sdfetch
+
+    class Chunk:
+        tsn = 5
+
+    class Sctp:
+        _sent_queue = [Chunk()]
+
+    class Pc:
+        sctp = Sctp()
+        iceConnectionState = "completed"
+
+    t = tunnel()
+    t.pc = Pc()
+    monkeypatch.setattr(sdfetch, "UNACKED_GIVE_UP_S", 0.5)
+    assert asyncio.run(t._wait(3, 10, label="x.mp4")) is None
+    assert t.stalled is True
+    assert asyncio.run(t.fetch("y.mp4", 10)) is None   # the rest of the session is skipped
