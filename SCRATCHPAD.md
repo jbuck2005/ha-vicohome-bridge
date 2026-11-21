@@ -19,6 +19,12 @@ pin the runner image.
 
 ---
 
+## 2026-11-21: First SD clips without host networking (dev.13, first run)
+
+**Result:** on dev.13 (no host networking, rating 8), both clips came through: 1.98 MB + 0.8 MB in ~18 s, and both visits now have 20 s from the card. The log said "behind NAT; ... new address, port kept".
+**Caveat:** this run did NOT use the new candidate yet. The address is only learnt during the first run ("new address"), and there was no "advertising..." line. So this success isn't from the #38 change. It finished ~15-18 s after link-up, just past where earlier runs stalled (11-14 s), so the stall may not be deterministic. It's 1 success vs 4 stalls so far.
+**Next:** more SD runs on dev.13. Each should now log "advertising the LAN address the camera saw last time". If those complete reliably, record the root cause and rating 8 in the README and close #35. If not, keep digging.
+
 ## 2026-11-21: NAT stall is a timer; offer the camera a reachable address (PR #38 into edge, 0.4.3-dev.13)
 
 **dev.11 run 2 (window 128):** it stalled at ~1.0 MB, ~11 s after link up. Across all three NAT runs, the camera stops 10-14 s after link up, whatever the bytes or window. So it's time-based, not load.
