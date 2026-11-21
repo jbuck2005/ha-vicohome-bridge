@@ -22,6 +22,7 @@ import asyncio
 import base64
 import json
 import logging
+import os
 import re
 import secrets
 import socket as _socket
@@ -32,6 +33,7 @@ from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 import aioice.ice
+import aioice.stun
 from aiortc import RTCConfiguration, RTCPeerConnection, RTCSessionDescription
 from aiortc.mediastreams import AudioStreamTrack
 from aiortc.rtcsctptransport import RTCSctpTransport
@@ -103,6 +105,55 @@ def _is_stun(data) -> bool:
     return len(data) >= 20 and data[0] < 2 and data[4:8] == b"\x21\x12\xa4\x42"
 
 
+# ---- NAT: advertise the address the camera really sees -------------------------------------
+# Without host networking our only candidate is the add-on network's private address, which the
+# camera can't reach; it learns our NAT'd address from our checks instead. The camera answers each
+# check with the address it saw (XOR-MAPPED-ADDRESS). The bridge keeps that LAN address in /data and,
+# on the next session, advertises its candidate at that address (same port: Docker's NAT keeps the
+# source port when it can), so the camera has no unreachable candidate. sd_nat_candidate: off stops it.
+NAT_FILE = "/data/sd_nat_ip"
+NAT_CANDIDATE = [True]
+
+
+def _note_mapped(data) -> None:
+    try:
+        msg = aioice.stun.parse_message(data)
+    except ValueError:
+        return
+    mapped = msg.attributes.get("XOR-MAPPED-ADDRESS")
+    if mapped and "mapped" not in NET:
+        NET["mapped"] = (str(mapped[0]), int(mapped[1]))
+
+
+def _load_nat_ip() -> str | None:
+    try:
+        with open(NAT_FILE, encoding="ascii") as fh:
+            ip = fh.read().strip()
+        _socket.inet_aton(ip)
+        return ip
+    except (OSError, ValueError):
+        return None
+
+
+def _save_nat_ip(ip: str) -> None:
+    try:
+        with open(NAT_FILE + ".tmp", "w", encoding="ascii") as fh:
+            fh.write(ip)
+        os.replace(NAT_FILE + ".tmp", NAT_FILE)
+    except OSError:
+        pass
+
+
+def _advertised(line: str, local_ip: str | None, nat_ip: str | None) -> str:
+    """The candidate line with the add-on network's address swapped for the LAN address the camera sees."""
+    if not (local_ip and nat_ip) or local_ip == nat_ip:
+        return line
+    parts = line.split()
+    if len(parts) > 5 and parts[4] == local_ip:
+        parts[4] = nat_ip
+    return " ".join(parts)
+
+
 def _stun_count(data, way: str) -> None:
     """Count a STUN message as a request or a response, per direction, and when the last one was seen.
 
@@ -112,6 +163,8 @@ def _stun_count(data, way: str) -> None:
         return
     t = (data[0] << 8) | data[1]
     kind = "req" if (((t >> 7) & 2) | ((t >> 4) & 1)) == 0 else "resp"
+    if way == "in" and kind == "resp":
+        _note_mapped(data)
     NET[f"{way}_{kind}"] = NET.get(f"{way}_{kind}", 0) + 1
     NET[f"last_{way}_{kind}"] = time.time()
 
@@ -202,6 +255,13 @@ def _sctp_init_rwnd(self, *a, **k):
 
 
 RTCSctpTransport.__init__ = _sctp_init_rwnd
+
+
+def _local_port(pc):
+    try:
+        return pc.sctp.transport.transport._connection._nominated.get(1).local_candidate.port
+    except Exception:
+        return None
 
 
 def _pair_kind(pc) -> str:
@@ -605,7 +665,12 @@ class _Tunnel:
                 for c in pending:
                     await pc.addIceCandidate(c)
                 pending.clear()
+                nat_ip = _load_nat_ip() if NAT_CANDIDATE[0] else None
                 for line, mid, idx in [(c, m, i) for c, m, i in _local_candidates(pc) if m == "0"]:
+                    adv = _advertised(line, self.iface_ip, nat_ip)
+                    if adv != line:
+                        self.log.info("sdfetch: advertising the LAN address the camera saw last time")
+                    line = adv
                     await send({"method": "TRANSMIT", "messageType": "ICE_CANDIDATE",
                                 "messagePayload": _b64json({"candidate": line, "sdpMid": mid, "sdpMLineIndex": idx}),
                                 "recipientClientId": self.serial, "senderClientId": uid,
@@ -642,6 +707,14 @@ class _Tunnel:
             raise RuntimeError(f"no link to the camera after {timeout:.0f} s (ICE {pc.iceConnectionState})") from None
         self.log.info("sdfetch: link up (%s); rcvbuf %d kB, rx window %d kB", _pair_kind(pc), NET.get("rcvbuf", 0) // 1024,
                       (getattr(pc.sctp, "_advertised_rwnd", 0) if pc.sctp else 0) // 1024)
+        mapped = NET.get("mapped")
+        if mapped and self.iface_ip and mapped[0] != self.iface_ip:
+            local_port = _local_port(pc)
+            self.log.info("sdfetch: behind NAT; the camera sees us at a %s address, port %s", 
+                          "known" if mapped[0] == _load_nat_ip() else "new",
+                          "kept" if local_port == mapped[1] else f"changed ({local_port} -> {mapped[1]})")
+            if NAT_CANDIDATE[0] and mapped[0] != _load_nat_ip():
+                _save_nat_ip(mapped[0])
 
     async def close(self) -> None:
         try:

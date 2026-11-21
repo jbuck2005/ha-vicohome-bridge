@@ -1,6 +1,13 @@
 # Changelog
 
 ## Unreleased
+- SD link without host networking (0.4.3-dev.13): in all three real tests through Home Assistant's NAT, the
+  camera stopped sending 10-14 s after the link came up, whatever the window and however much had arrived,
+  then went quiet. Our only ICE candidate is the add-on network's private address, which the camera can't
+  reach, so its checks to that address keep failing for about that long. The camera now reports the address
+  it sees us at, the bridge keeps that LAN address in `/data`, and from the next session it offers the camera
+  that address instead. The log says when the link is behind NAT and whether the NAT kept our port. New
+  option `sd_nat_candidate` (on) turns this off.
 - `sd_rx_window_kb` now shows in the add-on's Configuration tab with its default (1024), instead of being a
   hidden optional setting (0.4.3-dev.12).
 - SD link statistics split the ICE checks each way: how many checks we sent and how many the camera answered
