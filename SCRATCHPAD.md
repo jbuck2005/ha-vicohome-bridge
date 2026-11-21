@@ -5,6 +5,20 @@ between sessions. It is never merged into `main` or `edge`.
 
 ---
 
+## 2026-11-21: No host networking (PR #28 into edge, 0.4.3-dev.3)
+
+**Changed:** I removed `host_network` so the add-on runs on Supervisor's add-on network with no ports, which
+should take the rating from 5 to the top of the scale. Only the SD card WebRTC link ever needed the host
+network. Our ICE checks now reach the camera through the host's NAT and the camera answers the NAT'd address
+(peer-reflexive). A new CI check puts a fake camera behind a namespace with no route back to the container
+network and proves the data channel opens through NAT (and fails without it). A failed link now logs
+`no link to the camera` instead of a bare timeout.
+**Status:** PR open, CI running. Unproven against the real camera's ICE stack.
+**Next:** merge, update the edge add-on on HA (take the backup it offers), then check the rating, an SD fetch
+or `sd_poll` read, and the log. If SD breaks, restore the backup or revert the PR.
+
+---
+
 ## 2026-11-21: Signed images research (no PR)
 
 **Changed:** nothing in the code. I checked whether signed prebuilt images would earn the last rating point. They
