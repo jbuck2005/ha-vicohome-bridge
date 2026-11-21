@@ -103,6 +103,19 @@ def _is_stun(data) -> bool:
     return len(data) >= 20 and data[0] < 2 and data[4:8] == b"\x21\x12\xa4\x42"
 
 
+def _stun_count(data, way: str) -> None:
+    """Count a STUN message as a request or a response, per direction, and when the last one was seen.
+
+    A request we send that gets no response means our packets no longer reach the camera (or its
+    answers no longer reach us); a request the camera sends that we answer shows its side is alive."""
+    if not _is_stun(data):
+        return
+    t = (data[0] << 8) | data[1]
+    kind = "req" if (((t >> 7) & 2) | ((t >> 4) & 1)) == 0 else "resp"
+    NET[f"{way}_{kind}"] = NET.get(f"{way}_{kind}", 0) + 1
+    NET[f"last_{way}_{kind}"] = time.time()
+
+
 _sp_dr = aioice.ice.StunProtocol.datagram_received
 
 
@@ -112,6 +125,7 @@ def _sp_dr_count(self, data, addr):
         NET["in_b"] += len(data)
         NET["last_in"] = time.time()
         NET["in_stun"] += _is_stun(data)
+        _stun_count(data, "in")
         NET["srcs"].add((addr[0], addr[1]))
     return _sp_dr(self, data, addr)
 
@@ -150,6 +164,7 @@ def _sp_cm_count(self, transport):
             NET["out_b"] += len(data)
             NET["last_out"] = time.time()
             NET["out_stun"] += _is_stun(data)
+            _stun_count(data, "out")
         try:
             return send(data, addr)
         except Exception:
@@ -218,9 +233,11 @@ def net_stats(pc) -> str:
         sc = (f"rx tsn {getattr(sctp, '_last_received_tsn', None)} gaps {len(getattr(sctp, '_sack_misordered', ()))} "
               f"dups {len(getattr(sctp, '_sack_duplicates', ()))} rwnd {getattr(sctp, '_advertised_rwnd', 0) // 1024}k "
               f"unacked {len(getattr(sctp, '_sent_queue', ()))} sacks {NET['sacks']} (last {ago(NET['last_sack'])})")
-    return (f"in {NET['in']} pkts {NET['in_b'] // 1024} kB (last {ago(NET['last_in'])}, stun {NET['in_stun']}, "
-            f"{len(NET['srcs'])} source(s)); out {NET['out']} pkts {NET['out_b'] // 1024} kB (last "
-            f"{ago(NET['last_out'])}, stun {NET['out_stun']}, send errors {NET['send_err']}); socket errors "
+    return (f"in {NET['in']} pkts {NET['in_b'] // 1024} kB (last {ago(NET['last_in'])}, {len(NET['srcs'])} "
+            f"source(s)); out {NET['out']} pkts {NET['out_b'] // 1024} kB (last {ago(NET['last_out'])}, send errors "
+            f"{NET['send_err']}); our checks {NET.get('out_req', 0)} sent, {NET.get('in_resp', 0)} answered (last answer "
+            f"{ago(NET.get('last_in_resp', 0))}); camera checks {NET.get('in_req', 0)} (last {ago(NET.get('last_in_req', 0))}), "
+            f"{NET.get('out_resp', 0)} answered; socket errors "
             f"{NET['sock_err']}; rcvbuf {NET['rcvbuf'] // 1024} kB; udp {drops}; sctp {sc}")
 
 
