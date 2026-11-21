@@ -42,9 +42,9 @@ This project has no connection with Vicohome. The dashboard assumes a camera nam
 your camera's name.
 
 ## Security rating
-Home Assistant rates the add-on 5 out of a possible 6 shields. Every add-on starts at 5. The add-on's own AppArmor
-profile adds 1, and host networking takes 1 away. The add-on runs on the host network for the SD card link,
-which talks to the camera directly on your LAN.
+Every add-on starts at 5 shields out of 6. The add-on's own AppArmor profile adds 1. From 0.4.3-dev.9 it runs on
+Home Assistant's add-on network instead of the host network and opens no ports, which should give it the top
+rating. The SD card link still reaches the camera on your LAN, through the add-on network's NAT.
 
 What was looked at to go higher (November 2026):
 
@@ -56,8 +56,8 @@ What was looked at to go higher (November 2026):
   Host networking came back in 0.4.3-dev.4 and the clip still didn't arrive, so host networking was never the
   cause. The real cause was the clip request: the camera ignored the path the add-on built and only answers
   the download address it gives in its own card listing (fixed in 0.4.3-dev.7, the first SD clip pulled from a
-  real camera). Running without host networking is worth trying again on top of that fix. Until it is proven on
-  a real camera, host networking stays.
+  real camera). 0.4.3-dev.9 tries running without host networking again on top of that fix. If an SD clip
+  doesn't come through on a real camera, host networking comes back.
 
 ## Licence
 

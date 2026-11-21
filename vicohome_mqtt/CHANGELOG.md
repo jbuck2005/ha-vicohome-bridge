@@ -1,6 +1,11 @@
 # Changelog
 
 ## Unreleased
+- Trying again without host networking (0.4.3-dev.9), now that SD clips work. The add-on runs on Home
+  Assistant's add-on network and opens no ports, which should raise the security rating from 5 to the top.
+  The SD card link reaches the camera through that network's NAT, which got through ICE and listed the card in
+  0.4.3-dev.3. CI again checks ICE through NAT to a fake camera that has no route back. If a real SD clip
+  fails on this build, host networking comes back.
 - Confirmed on a real camera (0.4.3-dev.7): the first SD card clip pulled end to end, about 3.9 MB in about
   14 s, which replaced a short cloud clip with the full 20 s recording. The camera answers only the
   `downloadUrl` from its own card listing (`/dc/download/...`). The path the add-on used to build was never
