@@ -25,7 +25,7 @@ pin the runner image.
 clip request in 90 s, and stopped answering STUN about 8 s after it. So consent was a symptom: the camera
 goes quiet on the clip request itself. #31 logs hang-ups and data-channel close (and stops waiting there), and
 at debug level every signalling message, data frame and the first listing entry.
-**Status:** PR open. Asked whether an SD clip ever arrived on my setup.
+**Status:** squash-merged into edge (0.4.3-dev.6). No record found of an SD clip ever arriving on real hardware; treating it as the request never having worked. Best guess: the camera ends the session ~10-15 s after stopLive (sleep or missing heartbeat).
 **Next:** merge, set log_level debug, repeat the test, read the sdfetch lines.
 
 ---
