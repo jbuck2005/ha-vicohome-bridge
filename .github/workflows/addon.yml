@@ -76,48 +76,25 @@ jobs:
           sudo grep -x 'vicohome_mqtt (enforce)' /sys/kernel/security/apparmor/profiles
       - name: Start an anonymous MQTT broker
         run: |
-          # A bridged network, like Supervisor's add-on network; the broker plays core-mosquitto.
-          docker network create addons
-          docker run -d --name mqtt --network addons -p 1883:1883 eclipse-mosquitto:2 mosquitto -c /mosquitto-no-auth.conf
+          docker run -d --name mqtt -p 1883:1883 eclipse-mosquitto:2 mosquitto -c /mosquitto-no-auth.conf
           for i in $(seq 1 20); do nc -z 127.0.0.1 1883 && exit 0; sleep 1; done
           docker logs mqtt; exit 1
-      - name: Put a fake camera on a LAN the add-on network can only reach through NAT
-        run: |
-          # The camera's namespace has no route back to the add-on network, like a real camera.
-          sudo ip netns add cam
-          sudo ip link add veth-lan type veth peer name veth-cam
-          sudo ip link set veth-cam netns cam
-          sudo ip addr add 192.0.2.1/24 dev veth-lan
-          sudo ip link set veth-lan up
-          sudo ip -n cam addr add 192.0.2.2/24 dev veth-cam
-          sudo ip -n cam link set veth-cam up
-          sudo ip -n cam link set lo up
-          sudo sysctl -qw net.ipv4.ip_forward=1
-          sudo iptables -I FORWARD -o veth-lan -j ACCEPT
-          sudo iptables -I FORWARD -i veth-lan -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
-          python3 -m venv "$RUNNER_TEMP/cam-venv"
-          "$RUNNER_TEMP/cam-venv/bin/pip" install -q "$(grep -E '^aiortc==' vicohome_mqtt/requirements.txt)"
       - name: Run the add-on's mounts and checks under the profile
         run: |
-          mkdir -p "$RUNNER_TEMP"/{data/ice,media,ha/www}
+          mkdir -p "$RUNNER_TEMP"/{data,media,ha/www}
           # Supervisor's folders are root-owned; root in the container has no DAC override.
-          chmod 777 "$RUNNER_TEMP"/{data,data/ice,media,ha,ha/www}
+          chmod 777 "$RUNNER_TEMP"/{data,media,ha,ha/www}
           echo "# test" > "$RUNNER_TEMP/ha/configuration.yaml"
           sudo dmesg --clear || true
           run() {
-            # As Supervisor starts it: --init, a bridged network, the same mounts, the profile.
-            docker run --rm --init --network addons --security-opt apparmor=vicohome_mqtt \
+            # As Supervisor starts it: --init, host network, the same mounts, the profile.
+            docker run --rm --init --network host --security-opt apparmor=vicohome_mqtt \
               -v "$RUNNER_TEMP/data:/data" -v "$RUNNER_TEMP/media:/media" -v "$RUNNER_TEMP/ha:/homeassistant" \
-              -v "$PWD/tests:/app/tests:ro" -e MQTT_HOST=mqtt -e BRIDGE_APP=/app \
+              -v "$PWD/tests:/app/tests:ro" -e MQTT_HOST=127.0.0.1 -e BRIDGE_APP=/app \
               vicohome_mqtt:apparmor "$@"
           }
           run python3 /app/tests/apparmor_ice_check.py
           run python3 /app/tests/e2e_fake_cloud.py
-          # The SD card link without host networking: ICE through the host's NAT to the camera.
-          # The SDP exchange folder sits in /data, which the profile lets the add-on write.
-          sudo ip netns exec cam timeout 120 "$RUNNER_TEMP/cam-venv/bin/python" tests/nat_ice_check.py camera "$RUNNER_TEMP/data/ice" &
-          run python3 /app/tests/nat_ice_check.py bridge /data/ice
-          wait
       - name: No AppArmor denials
         if: always()
         run: |
