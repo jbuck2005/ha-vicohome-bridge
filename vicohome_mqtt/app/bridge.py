@@ -8,10 +8,12 @@ the Home Assistant entities through MQTT discovery.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import logging
 import os
 import re
+import secrets
 import shutil
 import signal
 import sys
@@ -25,7 +27,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import paho.mqtt.client as mqtt
 import requests
 
-from clips import PERIOD_SLACK_S, TRUST_AFTER_S, ClipBudget, ClipMaker, clip_name, mp4_seconds
+from clips import PERIOD_SLACK_S, TRUST_AFTER_S, ClipBudget, ClipMaker, mp4_seconds
 from tracker import Tracker
 from vicohome import AuthError, Device, Event, VicohomeClient, VicohomeError
 
@@ -33,6 +35,7 @@ VERSION = "0.4.3-dev.2"
 LOG = logging.getLogger("vicohome")
 OPTIONS_FILE = "/data/options.json"
 STATE_FILE = "/data/state.json"
+SD_KEY_FILE = "/data/sd_key"
 MEDIA_ROOT = Path("/media")
 RECENT_IN_ATTRIBUTES = 10
 # Clip repair: how often the kept visits of the last REPAIR_WINDOW_S are checked against the cloud,
@@ -129,9 +132,38 @@ def clip_mode(opts: dict[str, Any]) -> str:
     return "sd_only" if sd_polling(opts) else opts.get("clip_source", "cloud_first")
 
 
+_sd_key: bytes | None = None
+
+
+def sd_key() -> bytes:
+    """A random key kept in /data, made on first use. SD visit ids are keyed with it so they can't be guessed."""
+    global _sd_key
+    if _sd_key is None:
+        try:
+            _sd_key = Path(SD_KEY_FILE).read_bytes()
+        except FileNotFoundError:
+            _sd_key = b""
+        if len(_sd_key) < 16:
+            _sd_key = secrets.token_bytes(32)
+            try:
+                fd = os.open(SD_KEY_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                with os.fdopen(fd, "wb") as fh:
+                    fh.write(_sd_key)
+            except OSError as err:   # still unguessable, just not stable across restarts
+                LOG.warning("Could not save the SD visit key: %s", err.__class__.__name__)
+    return _sd_key
+
+
 def sd_trace_id(serial: str, ts: float) -> str:
-    """A visit id for an SD recording: stable across polls, unique per camera, and free of the serial
-    (clip file names are served under /local/ without a login)."""
+    """A visit id for an SD recording: stable across polls, unique per camera, and free of the serial and the time.
+    Clip files are named after it and served under /local/ without a login, so it must not be guessable: the
+    old form (a hash of the serial plus the start time) let anyone who saw one link try timestamps for the rest."""
+    mac = hmac.new(sd_key(), f"{serial}|{int(ts)}".encode(), hashlib.sha256).hexdigest()
+    return f"sd-{mac[:24]}"
+
+
+def legacy_sd_trace_id(serial: str, ts: float) -> str:
+    """The id 0.4.2 gave an SD recording. Only used to recognise visits already in the history."""
     return f"sd-{hashlib.sha256(serial.encode()).hexdigest()[:6]}-{int(ts)}"
 
 
@@ -471,14 +503,20 @@ class Bridge:
             changed = False
             for trace_id, data in got.items():
                 path = self.clips.path_for(trace_id)
-                path.parent.mkdir(parents=True, exist_ok=True)
                 tmp = path.with_suffix(".sdpart")
-                tmp.write_bytes(data)
-                secs = mp4_seconds(tmp)
-                if not secs:
+                try:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    tmp.write_bytes(data)
+                    secs = mp4_seconds(tmp)
+                    if secs:
+                        tmp.replace(path)
+                except OSError as err:   # a full disk: skip this clip, keep the rest of the poll going
+                    LOG.warning("SD backfill: could not save %s: %s", trace_id, err)
+                    secs = None
+                finally:
                     tmp.unlink(missing_ok=True)
+                if not secs:
                     continue
-                tmp.replace(path)
                 self.tracker.set_field(serial, trace_id, "clip_seconds", secs)
                 self.tracker.set_field(serial, trace_id, "clip_url", self.clips.url_for(trace_id))
                 LOG.info("SD backfill: %s now %.1f s from the card", trace_id, secs)
@@ -806,7 +844,7 @@ class Bridge:
 
         def known(seg: dict) -> bool:
             ts = float(seg["timestamp"])
-            if sd_trace_id(serial, ts) in seen:
+            if sd_trace_id(serial, ts) in seen or legacy_sd_trace_id(serial, ts) in seen:
                 return True
             end = ts + float(seg.get("period") or 20) + 2
             return any(ts - 5 <= v <= end for v in cloud)
