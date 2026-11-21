@@ -5,6 +5,19 @@ between sessions. It is never merged into `main` or `edge`.
 
 ---
 
+## 2026-11-21: AppArmor profile (PR #27 into edge, 0.4.3-dev.2)
+
+**Changed:** I added `vicohome_mqtt/apparmor.txt` so the add-on's security rating goes from 4 to 5. Host networking
+stays. The profile only lets the container run Python, ffmpeg and ffprobe, write to `/data`, `/tmp`, `/media` and
+`<config>/www`, and open IP, netlink and Unix sockets. The rest of the HA config isn't readable from inside it.
+A new CI job loads the profile in enforce mode, runs the fake-cloud e2e test and a WebRTC/ICE check inside the
+image under it, and fails on any denial.
+**Status:** PR open, waiting on CI. Merge #26 first; #27 then needs the version lines and changelog merged.
+**Next:** after the edge build lands on HA, check the rating shows 5 and the host log has no `apparmor="DENIED"`
+lines for `vicohome_mqtt`, especially after an SD card fetch, which CI can't test.
+
+---
+
 ## 2026-11-18: Review fixes (PR #26 into edge, 0.4.3-dev.1)
 
 **Changed:** the ICE interface filter is patched once, so SD polls no longer die of a RecursionError after about
