@@ -99,9 +99,9 @@ jobs:
           "$RUNNER_TEMP/cam-venv/bin/pip" install -q "$(grep -E '^aiortc==' vicohome_mqtt/requirements.txt)"
       - name: Run the add-on's mounts and checks under the profile
         run: |
-          mkdir -p "$RUNNER_TEMP"/{data/ice,media,ha/www}
+          mkdir -p "$RUNNER_TEMP"/{data/ice,data/ice-loss,media,ha/www}
           # Supervisor's folders are root-owned; root in the container has no DAC override.
-          chmod 777 "$RUNNER_TEMP"/{data,data/ice,media,ha,ha/www}
+          chmod 777 "$RUNNER_TEMP"/{data,data/ice,data/ice-loss,media,ha,ha/www}
           echo "# test" > "$RUNNER_TEMP/ha/configuration.yaml"
           sudo dmesg --clear || true
           run() {
@@ -115,9 +115,16 @@ jobs:
           run python3 /app/tests/e2e_fake_cloud.py
           # The SD card link without host networking: ICE through the host's NAT to the camera.
           # The SDP exchange folder sits in /data, which the profile lets the add-on write.
-          sudo ip netns exec cam timeout 120 "$RUNNER_TEMP/cam-venv/bin/python" tests/nat_ice_check.py camera "$RUNNER_TEMP/data/ice" &
+          # After ICE, the camera streams 8 MB, like an SD clip, so a stall during a transfer fails too.
+          sudo ip netns exec cam timeout 180 "$RUNNER_TEMP/cam-venv/bin/python" tests/nat_ice_check.py camera "$RUNNER_TEMP/data/ice" &
           run python3 /app/tests/nat_ice_check.py bridge /data/ice
           wait
+          # The same through a lossy LAN (bursty 2% loss on the camera's side of the NAT).
+          sudo tc qdisc add dev veth-lan root netem loss 2% 25%
+          sudo ip netns exec cam timeout 180 "$RUNNER_TEMP/cam-venv/bin/python" tests/nat_ice_check.py camera "$RUNNER_TEMP/data/ice-loss" &
+          run python3 /app/tests/nat_ice_check.py bridge /data/ice-loss
+          wait
+          sudo tc qdisc del dev veth-lan root
       - name: No AppArmor denials
         if: always()
         run: |

@@ -44,6 +44,12 @@ configuration:
       How often the bridge may wake the camera to pull clips from its SD card (cloud_first and sd_only).
       A smaller number wakes the camera more often and can shorten a battery camera's run time; a larger
       number is gentler but makes SD-sourced clips appear later. No effect with cloud_only.
+  sd_rx_window_kb:
+    name: SD receive window (kB, troubleshooting)
+    description: >-
+      Leave empty. How much of a clip the camera may send before it waits for the bridge's
+      acknowledgements (default 1024). A smaller value such as 128 sends the clip in smaller bursts,
+      for testing whether bursts are what stall an SD clip.
   visit_source:
     name: Visit source
     description: >-

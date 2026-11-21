@@ -75,6 +75,155 @@ def _sp_cm_bigrcv(self, transport):
 aioice.ice.StunProtocol.connection_made = _sp_cm_bigrcv
 
 
+# ---- link statistics (for the SD stall seen through NAT without host networking) ------------
+# Counts every UDP datagram the ICE sockets send and receive, socket errors (an ICMP error from a
+# NAT or the camera shows up as error_received), and the receive buffer the kernel really granted.
+# Only counts and times are kept: no addresses or payloads.
+NET: dict = {}
+
+
+def net_reset() -> None:
+    NET.clear()
+    NET.update({"in": 0, "in_b": 0, "in_stun": 0, "out": 0, "out_b": 0, "out_stun": 0, "send_err": 0,
+                "sock_err": 0, "last_in": 0.0, "last_out": 0.0, "srcs": set(), "rcvbuf": 0, "sacks": 0,
+                "last_sack": 0.0, "udp0": _udp_counters()})
+
+
+def _udp_counters() -> dict:
+    """The kernel's UDP counters for this network namespace (/proc/net/snmp), e.g. RcvbufErrors."""
+    try:
+        with open("/proc/net/snmp", encoding="ascii") as fh:
+            rows = [line.split() for line in fh if line.startswith("Udp:")]
+        return dict(zip(rows[0][1:], (int(v) for v in rows[1][1:]))) if len(rows) >= 2 else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _is_stun(data) -> bool:
+    return len(data) >= 20 and data[0] < 2 and data[4:8] == b"\x21\x12\xa4\x42"
+
+
+_sp_dr = aioice.ice.StunProtocol.datagram_received
+
+
+def _sp_dr_count(self, data, addr):
+    if NET:
+        NET["in"] += 1
+        NET["in_b"] += len(data)
+        NET["last_in"] = time.time()
+        NET["in_stun"] += _is_stun(data)
+        NET["srcs"].add((addr[0], addr[1]))
+    return _sp_dr(self, data, addr)
+
+
+aioice.ice.StunProtocol.datagram_received = _sp_dr_count
+
+_sp_err = aioice.ice.StunProtocol.error_received
+
+
+def _sp_err_count(self, exc):
+    if NET:
+        NET["sock_err"] += 1
+        if NET["sock_err"] <= 3:
+            LOG.info("sdfetch: the link's socket reported an error: %s", exc.__class__.__name__)
+    return _sp_err(self, exc)
+
+
+aioice.ice.StunProtocol.error_received = _sp_err_count
+
+_sp_cm2 = aioice.ice.StunProtocol.connection_made
+
+
+def _sp_cm_count(self, transport):
+    _sp_cm2(self, transport)
+    try:
+        s = transport.get_extra_info("socket")
+        if s is not None and NET:
+            NET["rcvbuf"] = max(NET["rcvbuf"], s.getsockopt(_socket.SOL_SOCKET, _socket.SO_RCVBUF))
+    except Exception:
+        pass
+    send = transport.sendto
+
+    def sendto(data, addr=None):
+        if NET:
+            NET["out"] += 1
+            NET["out_b"] += len(data)
+            NET["last_out"] = time.time()
+            NET["out_stun"] += _is_stun(data)
+        try:
+            return send(data, addr)
+        except Exception:
+            if NET:
+                NET["send_err"] += 1
+            raise
+
+    transport.sendto = sendto
+
+
+aioice.ice.StunProtocol.connection_made = _sp_cm_count
+
+_sctp_sack = RTCSctpTransport._send_sack
+
+
+async def _sctp_sack_count(self):
+    if NET:
+        NET["sacks"] += 1
+        NET["last_sack"] = time.time()
+    return await _sctp_sack(self)
+
+
+RTCSctpTransport._send_sack = _sctp_sack_count
+
+# Optional SCTP receive window (sd_rx_window_kb): how much the camera may send before it waits
+# for our acknowledgements. aiortc's default is 1 MB; a smaller window means smaller bursts.
+RX_WINDOW_KB = [0]
+_sctp_init = RTCSctpTransport.__init__
+
+
+def _sctp_init_rwnd(self, *a, **k):
+    _sctp_init(self, *a, **k)
+    if RX_WINDOW_KB[0]:
+        self._advertised_rwnd = int(RX_WINDOW_KB[0]) * 1024
+
+
+RTCSctpTransport.__init__ = _sctp_init_rwnd
+
+
+def _pair_kind(pc) -> str:
+    """The candidate types of the ICE pair in use, e.g. "host -> host" (no addresses)."""
+    try:
+        conn = pc.sctp.transport.transport._connection
+        pair = conn._nominated.get(1)
+        return f"{pair.local_candidate.type} -> {pair.remote_candidate.type}"
+    except Exception:
+        return "pair unknown"
+
+
+def net_stats(pc) -> str:
+    """One line of link statistics: datagrams each way, seconds since the last one each way, STUN,
+    socket errors, the kernel's UDP drop counters since the session began, and SCTP progress."""
+    if not NET:
+        return "-"
+    now = time.time()
+
+    def ago(t):
+        return f"{now - t:.0f}s" if t else "never"
+
+    udp, udp0 = _udp_counters(), NET.get("udp0") or {}
+    drops = {k: udp.get(k, 0) - udp0.get(k, 0) for k in ("InErrors", "RcvbufErrors", "SndbufErrors")
+             if k in udp}
+    sctp = getattr(pc, "sctp", None) if pc else None
+    sc = "-"
+    if sctp is not None:
+        sc = (f"rx tsn {getattr(sctp, '_last_received_tsn', None)} gaps {len(getattr(sctp, '_sack_misordered', ()))} "
+              f"dups {len(getattr(sctp, '_sack_duplicates', ()))} rwnd {getattr(sctp, '_advertised_rwnd', 0) // 1024}k "
+              f"unacked {len(getattr(sctp, '_sent_queue', ()))} sacks {NET['sacks']} (last {ago(NET['last_sack'])})")
+    return (f"in {NET['in']} pkts {NET['in_b'] // 1024} kB (last {ago(NET['last_in'])}, stun {NET['in_stun']}, "
+            f"{len(NET['srcs'])} source(s)); out {NET['out']} pkts {NET['out_b'] // 1024} kB (last "
+            f"{ago(NET['last_out'])}, stun {NET['out_stun']}, send errors {NET['send_err']}); socket errors "
+            f"{NET['sock_err']}; rcvbuf {NET['rcvbuf'] // 1024} kB; udp {drops}; sctp {sc}")
+
+
 # Keep the link up when the camera stops answering ICE consent checks (RFC 7675). aioice closes the
 # connection after six unanswered checks, about 30 s. The camera goes quiet on STUN once it streams a
 # clip, so a clip that takes longer than that was cut off. Our own timeouts still end a dead session.
@@ -121,6 +270,8 @@ APP_INFO = {"appName": "VicoHome", "appType": "Android", "bundle": "com.smartadd
             "channelId": 1000, "tenantId": "vicoo", "version": 406000877, "versionName": "4.6.0"}
 LOCAL_ROOT = "https://127.0.0.1:15000"
 _LOCAL_HOSTS = {"", "127.0.0.1", "localhost", "api-local.safemo.com"}
+STATS_EVERY_S = 2        # link statistics while a clip comes off the card
+STALL_NOTE_S = 3         # note once when no data has arrived for this long
 UNACKED_GIVE_UP_S = 20   # the camera took the link but stopped acknowledging our messages
 
 
@@ -258,8 +409,23 @@ class _Tunnel:
     async def _wait(self, sid: int, timeout: float, label: str | None = None):
         t0 = time.time()
         next_note = t0 + 10
+        next_stats = t0 + STATS_EVERY_S
+        last_rx, last_change, stall_noted = self._rx_bytes(), t0, False
         while time.time() - t0 < timeout:
             d = self._collected().get(sid)
+            if label:
+                rx = self._rx_bytes()
+                if rx != last_rx:
+                    if stall_noted:
+                        self.log.info("sdfetch: %s: data again after %.0f s: %s", label, time.time() - last_change,
+                                      net_stats(self.pc))
+                    last_rx, last_change, stall_noted = rx, time.time(), False
+                elif not stall_noted and time.time() - last_change >= STALL_NOTE_S:
+                    stall_noted = True
+                    self.log.info("sdfetch: %s: nothing new for %d s: %s", label, STALL_NOTE_S, net_stats(self.pc))
+                if time.time() >= next_stats:
+                    next_stats += STATS_EVERY_S
+                    self.log.info("sdfetch link: %s", net_stats(self.pc))
             if d and (d["end"] or (self._declared(d) and len(d["body"]) >= self._declared(d))):
                 return d
             if self.done is not None and self.done.is_set():
@@ -316,6 +482,7 @@ class _Tunnel:
     # ---- session ----
     async def connect(self, timeout: float = 45) -> None:
         _ICE_IFACE[0] = self.iface_ip   # read by _host_addresses below (one patch, not one per connect)
+        net_reset()
         ticket = self.api.webrtc_ticket(self.serial)
         data = ticket.get("data") or {}
         if ticket.get("result") != 0 or not data.get("accessToken"):
@@ -456,6 +623,8 @@ class _Tunnel:
         except asyncio.TimeoutError:
             # Name the stage, so a link that can't reach the camera isn't logged as a bare timeout.
             raise RuntimeError(f"no link to the camera after {timeout:.0f} s (ICE {pc.iceConnectionState})") from None
+        self.log.info("sdfetch: link up (%s); rcvbuf %d kB, rx window %d kB", _pair_kind(pc), NET.get("rcvbuf", 0) // 1024,
+                      (getattr(pc.sctp, "_advertised_rwnd", 0) if pc.sctp else 0) // 1024)
 
     async def close(self) -> None:
         try:

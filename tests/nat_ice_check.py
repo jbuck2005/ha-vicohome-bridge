@@ -8,11 +8,18 @@ the camera answering the NAT'd address it sees (a peer-reflexive candidate).
 
     python3 tests/nat_ice_check.py camera <dir>   # in the camera's namespace
     python3 tests/nat_ice_check.py bridge <dir>   # in the add-on image
+
+After the hello, the camera streams BULK_BYTES in 1200-byte messages, like an SD clip coming off the
+card, so a link that sets up through NAT but stalls during a transfer fails too.
 """
 
 import asyncio
 import os
 import sys
+import time
+
+BULK_BYTES = 8 * 1024 * 1024
+CHUNK = 1200
 
 from aiortc import RTCConfiguration, RTCPeerConnection, RTCSessionDescription
 
@@ -44,28 +51,35 @@ async def camera(d: str) -> int:
         @ch.on("message")
         def _echo(msg):
             ch.send(b"camera:" + (msg if isinstance(msg, bytes) else msg.encode()))
+            block = os.urandom(CHUNK)
+            for _ in range(BULK_BYTES // CHUNK):
+                ch.send(block)
 
     offer = await _wait_read(f"{d}/offer.sdp")
     await pc.setRemoteDescription(RTCSessionDescription(offer, "offer"))
     await pc.setLocalDescription(await pc.createAnswer())
     print("camera candidates:", _candidates(pc), flush=True)
     _write(f"{d}/answer.sdp", pc.localDescription.sdp)
-    await _wait_read(f"{d}/done", 90)
+    await _wait_read(f"{d}/done", 150)
     await pc.close()
     return 0
 
 
 async def bridge(d: str) -> int:
     sys.path.insert(0, os.environ.get("BRIDGE_APP", "/app"))
-    import sdfetch  # noqa: F401  (applies the add-on's ICE patches)
+    import sdfetch  # applies the add-on's ICE patches and link statistics
     from bridge import Bridge
 
     ip = Bridge._lan_ip()
     print("bridge address:", ip, flush=True)
     sdfetch._ICE_IFACE[0] = ip
+    sdfetch.net_reset()
     pc = RTCPeerConnection(RTCConfiguration(iceServers=[]))
     ch = pc.createDataChannel("probe")
-    got = asyncio.get_running_loop().create_future()
+    loop = asyncio.get_running_loop()
+    got = loop.create_future()
+    bulk = loop.create_future()
+    seen = [0]
 
     @ch.on("open")
     def _open():
@@ -75,6 +89,10 @@ async def bridge(d: str) -> int:
     def _msg(msg):
         if not got.done():
             got.set_result(msg)
+            return
+        seen[0] += len(msg)
+        if seen[0] >= BULK_BYTES // CHUNK * CHUNK and not bulk.done():
+            bulk.set_result(True)
 
     await pc.setLocalDescription(await pc.createOffer())
     print("bridge candidates:", _candidates(pc), flush=True)
@@ -82,15 +100,25 @@ async def bridge(d: str) -> int:
     await pc.setRemoteDescription(RTCSessionDescription(await _wait_read(f"{d}/answer.sdp"), "answer"))
     try:
         reply = await asyncio.wait_for(got, 30)
+        if reply != b"camera:hello":
+            print("FAIL unexpected reply", reply)
+            return 1
+        t0 = time.time()
+        try:
+            await asyncio.wait_for(bulk, 60)
+        except asyncio.TimeoutError:
+            print("FAIL bulk transfer stalled at %d of %d kB: %s" % (seen[0] // 1024, BULK_BYTES // 1024,
+                                                                   sdfetch.net_stats(pc)), flush=True)
+            return 1
+        dt = time.time() - t0
+        print("bulk: %d kB in %.1f s (%.0f kB/s): %s" % (seen[0] // 1024, dt, seen[0] / 1024 / max(dt, 0.001),
+                                                        sdfetch.net_stats(pc)), flush=True)
     except asyncio.TimeoutError:
         print("FAIL no data-channel reply through NAT (ICE state %s)" % pc.iceConnectionState)
         return 1
     finally:
         _write(f"{d}/done", "")
         await pc.close()
-    if reply != b"camera:hello":
-        print("FAIL unexpected reply", reply)
-        return 1
     print("RESULT OK", flush=True)
     return 0
 
