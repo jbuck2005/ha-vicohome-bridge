@@ -5,6 +5,33 @@ between sessions. It is never merged into `main` or `edge`.
 
 ---
 
+## 2026-11-21: LAN probe of the camera (stock firmware)
+
+**What I ran.** `probes/cam_probe.sh` from my Docker host, inside a throwaway container (host network,
+raw sockets), in three parts: asleep (full TCP scan), a fast scan just after one Test SD fetch woke the
+camera, and a 25-minute passive listen around it.
+
+**Found.**
+- No open ports at all: none of 65535 TCP while asleep, none of the top 2000 TCP or top 50 UDP while awake.
+- No local wake signal visible from another LAN host. The camera's only broadcasts are ARP requests, mostly
+  for the router. Nothing vendor-named in any broadcast or multicast.
+- ARP replies come and go every 1-2 minutes the whole time, with no clean asleep/awake split. One frame
+  from the same MAC carried a router/extender-style firmware string, so the camera may sit behind a Wi-Fi
+  extender doing MAC translation. If so, that MAC and its ARP pattern belong to the extender, not the camera.
+- A switched LAN only shows a host its own traffic plus broadcasts, so the camera's unicast to HA and to the
+  cloud wasn't visible. That needs the router, the extender, or a capture on the HA host.
+- The press itself gave "camera lists 0 SD segments for the window", 0 of 2 clips.
+
+**Status.** Stock firmware offers nothing to talk to on the LAN until the cloud sets up a session. The
+remaining stock-firmware lead is how the phone app behaves with the internet cut off.
+
+**Next.**
+- Check whether the camera connects through a Wi-Fi extender.
+- Capture the phone app with the internet blocked (PCAPdroid on Android), live view and SD playback.
+- Tell the thread what I've seen the app do locally that makes me sure a local method exists.
+
+---
+
 ## 2026-11-21: SD clips work through NAT; 0.4.3 prepared
 
 **Root cause:** the empty card listings from dev.16 on came from PEER_OUT handling. When our session joins, the
