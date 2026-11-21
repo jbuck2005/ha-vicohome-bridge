@@ -42,22 +42,23 @@ This project has no connection with Vicohome. The dashboard assumes a camera nam
 your camera's name.
 
 ## Security rating
-Every add-on starts at 5 shields out of 6. The add-on's own AppArmor profile adds 1. From 0.4.3-dev.9 it runs on
-Home Assistant's add-on network instead of the host network and opens no ports, which should give it the top
-rating. The SD card link still reaches the camera on your LAN, through the add-on network's NAT.
+Home Assistant rates the add-on 5 on its 1-8 scale. Every add-on starts at 5, the add-on's own AppArmor profile
+adds 1, and host networking takes 1 away. Without host networking the add-on opens no ports, which adds 2 more:
+0.4.3-dev.9 showed 8. The add-on needs the host network for the SD card link, which streams clips from the
+camera directly on your LAN.
 
 What was looked at to go higher (November 2026):
 
 - **Signed images.** Signing no longer counts. The Supervisor dropped its Codenotary check in 2025.11 and gives
   no add-on a signing point today, cosign included. Prebuilt images would still make installs faster, but
   they wouldn't change the rating.
-- **No host networking.** The rating would go to the top, because the add-on opens no ports. In 0.4.3-dev.3 the
-  link to the camera got through Home Assistant's NAT and the card listing came back, but no clip arrived.
-  Host networking came back in 0.4.3-dev.4 and the clip still didn't arrive, so host networking was never the
-  cause. The real cause was the clip request: the camera ignored the path the add-on built and only answers
-  the download address it gives in its own card listing (fixed in 0.4.3-dev.7, the first SD clip pulled from a
-  real camera). 0.4.3-dev.9 tries running without host networking again on top of that fix. If an SD clip
-  doesn't come through on a real camera, host networking comes back.
+- **No host networking.** This takes the rating to 8. It was tried twice:
+  - 0.4.3-dev.3: no clip arrived. The real cause was the clip request, which the camera never accepted
+    (host networking failed the same way; fixed in 0.4.3-dev.7).
+  - 0.4.3-dev.9, on top of that fix: through Home Assistant's NAT the clip started (about 1.3 of 4.7 MB in
+    10 s), then stalled. The camera stopped answering connection checks and ended the session. On host
+    networking the same kind of clip arrives whole in about 14 s.
+  So host networking stays (0.4.3-dev.10) until the stall through NAT is understood.
 
 ## Licence
 
