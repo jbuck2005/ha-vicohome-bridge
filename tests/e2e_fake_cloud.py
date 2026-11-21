@@ -180,7 +180,7 @@ def main():
             fails.append(msg)
 
     disc = [t for t in topics if t.startswith("homeassistant/") and t.endswith("/config")]
-    check(len(disc) == 17, f"17 discovery configs ({len(disc)})")
+    check(len(disc) == 18, f"18 discovery configs ({len(disc)})")
     for d in disc:
         json.loads(topics[d][-1])
     last = json.loads(topics["vicohome_mqtt/cam0001/last"][-1])

@@ -4,6 +4,9 @@
 - New "Test SD fetch" button (0.4.3-dev.14), under each camera's Diagnostic entities: it fetches the 2
   newest visits from the card now, even if their clips exist, without waiting for `sd_fetch_hours` or a
   restart. An automation can publish a count (1-6) to `<base_topic>/clips/sd_test`.
+- SD link statistics now also sort the datagrams each way by kind: STUN, DTLS records (data, handshake,
+  alert), RTCP (receiver reports, NACK, PLI) and RTP. In the last NAT run the bridge kept sending about
+  50 packets a second after the camera stopped, and this shows what they are.
 - SD link without host networking (0.4.3-dev.13): in all three real tests through Home Assistant's NAT, the
   camera stopped sending 10-14 s after the link came up, whatever the window and however much had arrived,
   then went quiet. Our only ICE candidate is the add-on network's private address, which the camera can't
