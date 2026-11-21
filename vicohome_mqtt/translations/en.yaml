@@ -59,8 +59,9 @@ configuration:
   sd_send_audio:
     name: SD link sends audio
     description: >-
-      On (default): the SD card link sends the camera a silent audio stream (about 50 packets a second).
-      The camera seems to need it: with it off, the card listing never came back. Troubleshooting only.
+      On (default): the SD card link sends the camera a silent audio stream (about 50 packets a second),
+      as the bridge always has. Off: it offers two-way audio like the phone app but sends nothing.
+      Troubleshooting only.
   visit_source:
     name: Visit source
     description: >-
