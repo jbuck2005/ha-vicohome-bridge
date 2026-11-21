@@ -19,7 +19,8 @@ from pathlib import Path
 
 import paho.mqtt.client as mqtt
 
-APP = Path(__file__).resolve().parent.parent / "vicohome_mqtt" / "app"
+# BRIDGE_APP=/app runs it inside the add-on image (the AppArmor job in CI).
+APP = Path(os.environ.get("BRIDGE_APP") or Path(__file__).resolve().parent.parent / "vicohome_mqtt" / "app")
 sys.path.insert(0, str(APP))
 
 NOW = int(time.time())
@@ -130,7 +131,8 @@ def main():
     PLAYLIST = make_hls()
     assert PLAYLIST.count("#EXTINF") >= 2, "the test clip needs several segments to test a growing playlist"
     os.makedirs("/homeassistant/www", exist_ok=True)
-    Path("/homeassistant/configuration.yaml").write_text("# test\n")
+    if not Path("/homeassistant/configuration.yaml").exists():  # the add-on can't write it under AppArmor
+        Path("/homeassistant/configuration.yaml").write_text("# test\n")
     host = os.environ.get("MQTT_HOST", "127.0.0.1")
     srv = ThreadingHTTPServer(("127.0.0.1", 8765), Fake)
     threading.Thread(target=srv.serve_forever, daemon=True).start()

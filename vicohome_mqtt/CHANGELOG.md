@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+- The add-on ships its own AppArmor profile, which raises its Home Assistant security rating from 4 to 5.
+  The container may now only run Python, ffmpeg and ffprobe, write to `/data`, `/tmp`, `/media` and
+  `<config>/www`, and open IP sockets. The rest of the Home Assistant config is no longer readable from
+  inside it. Host networking stays, because the SD card link reaches the camera on the LAN. If a
+  feature stops working, look for `apparmor="DENIED"` lines with `profile="vicohome_mqtt"` in the host's
+  kernel log (Settings > System > Logs > Host).
+
 ## 0.4.2
 - The add-on now runs on Python 3.15 (was 3.12), and CI tests on 3.15 to match.
 - New option **`visit_source`**: `cloud` (default) or **`sd_poll`**. With `sd_poll` the bridge learns about
