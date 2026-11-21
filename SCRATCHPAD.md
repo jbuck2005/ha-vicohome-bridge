@@ -5,6 +5,20 @@ between sessions. It is never merged into `main` or `edge`.
 
 ---
 
+## 2026-11-21: Why some GitHub Actions runs failed
+
+**Changed:** Nothing in code. I went through every failed run in both repos. All of them were on PR branches
+while the work was in progress, and a later push on the same PR went green each time. Today's three were the new
+enforced-AppArmor job doing its job: #27's first push had ffmpeg/ffprobe blocked from reading
+`/sys/devices/system/node/` (allowed in the profile before merge), and #28's first two pushes had the NAT ICE
+test write to its `/ice` test mount, which the profile blocked (fixed in the PR). unsubscribird's last failure
+(#61, 2026-11-17) was a new test that couldn't import `app`, fixed on the next push.
+**Status:** `edge` and `main` are green in both repos. GitHub's failure emails come from those intermediate PR runs.
+**Next:** nothing. Heads-up: GitHub says `ubuntu-latest` moves to Ubuntu 26; if the AppArmor job breaks on that,
+pin the runner image.
+
+---
+
 ## 2026-11-21: No host networking (PR #28 into edge, 0.4.3-dev.3)
 
 **Changed:** I removed `host_network` so the add-on runs on Supervisor's add-on network with no ports, which
