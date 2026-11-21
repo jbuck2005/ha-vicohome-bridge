@@ -56,6 +56,12 @@ configuration:
       On (default): when the add-on isn't on the host network, the SD card link offers the camera the LAN
       address the camera saw us at last time, instead of the add-on network's private address it can't
       reach. The first SD session after an update learns it. Turn off to compare.
+  sd_send_audio:
+    name: SD link sends audio
+    description: >-
+      Off (default): the SD card link offers the camera two-way audio, as the phone app does, but sends it
+      nothing. On: send a silent audio stream (about 50 packets a second), as before 0.4.3-dev.17.
+      Troubleshooting only.
   visit_source:
     name: Visit source
     description: >-

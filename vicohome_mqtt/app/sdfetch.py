@@ -330,6 +330,17 @@ def net_stats(pc) -> str:
             f"kinds in {_kinds(NET.get('kinds_in'))} out {_kinds(NET.get('kinds_out'))}")
 
 
+def _deaf() -> bool:
+    """True when our last 2+ checks went unanswered for 6 s while the camera's own checks keep coming:
+    the camera sends to us, but what we send no longer seems to reach it."""
+    if not NET:
+        return False
+    now = time.time()
+    unanswered = NET.get("out_req", 0) - NET.get("in_resp", 0)
+    last_resp, last_req = NET.get("last_in_resp", 0), NET.get("last_in_req", 0)
+    return unanswered >= 2 and bool(last_resp) and now - last_resp >= 6 and bool(last_req) and now - last_req < 3
+
+
 def _kinds(d) -> str:
     return " ".join(f"{k}={v}" for k, v in sorted((d or {}).items())) or "-"
 
@@ -385,6 +396,7 @@ STALL_NOTE_S = 3         # note once when no data has arrived for this long
 UNACKED_GIVE_UP_S = 20   # the camera took the link but stopped acknowledging our messages
 RESUME_AFTER_S = 6       # a clip that gets nothing new for this long is asked for again from where it stopped
 RESUMES = 3              # at most this many times per clip
+SEND_AUDIO = [False]     # sd_send_audio: send the camera a silent audio stream, as before 0.4.3-dev.17
 SESSIONS = 2             # sessions per run: a recording that blocks one gets the rest a fresh session
 
 
@@ -544,6 +556,7 @@ class _Tunnel:
         next_note = t0 + 10
         next_stats = t0 + STATS_EVERY_S
         last_rx, last_change, stall_noted = self._rx_bytes(), t0, False
+        deaf_noted = False
         while time.time() - t0 < timeout:
             d = self._collected().get(sid)
             if label:
@@ -563,6 +576,10 @@ class _Tunnel:
                 return d
             if self.done is not None and self.done.is_set():
                 break   # the camera ended the session or ICE failed; nothing more will arrive
+            if label and not deaf_noted and _deaf():
+                deaf_noted = True
+                self.log.info("sdfetch: %s: the camera stopped answering our checks but still sends its own; our "
+                              "packets may no longer be reaching it: %s", label, net_stats(self.pc))
             if stall_s and d and d["status"] and time.time() - last_change >= stall_s:
                 break   # stalled part-way: the caller asks again from where it stopped
             if label and self._unacked_for() >= UNACKED_GIVE_UP_S:
@@ -629,7 +646,10 @@ class _Tunnel:
         pc = RTCPeerConnection(RTCConfiguration(iceServers=[]))
         self.pc = pc
         pc._RTCPeerConnection__cname = "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(16))
-        pc.addTrack(AudioStreamTrack())
+        if SEND_AUDIO[0]:
+            pc.addTrack(AudioStreamTrack())   # silence, about 50 RTP packets a second
+        else:
+            pc.addTransceiver("audio", direction="sendrecv")   # same offer, but no packets sent
         pc.addTransceiver("video", direction="recvonly")
         self.channel = pc.createDataChannel(self.serial)  # the camera streams SD media on the serial-labelled channel
         loop = asyncio.get_running_loop()
@@ -788,9 +808,9 @@ class _Tunnel:
             pass
 
     # ---- high level ----
-    async def prepare(self) -> None:
+    async def prepare(self, frame_wait: float = 35) -> None:
         try:
-            await asyncio.wait_for(asyncio.shield(self.first_frame), 35)
+            await asyncio.wait_for(asyncio.shield(self.first_frame), frame_wait)
         except asyncio.TimeoutError:
             self.log.debug("sdfetch: no live frame; continuing")
         await asyncio.sleep(1)
@@ -907,7 +927,7 @@ async def _run(api, serial: str, visits: list[tuple], iface_ip, per_clip_s, log)
         t = _Tunnel(api, serial, iface_ip, log)
         try:
             await t.connect()
-            await t.prepare()
+            await t.prepare(35 if session == 1 else 8)   # a camera already awake needs no long wait
             if want is None:
                 lo = min(v[1] for v in visits) - 60
                 hi = max(v[1] for v in visits) + 60

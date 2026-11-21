@@ -1,6 +1,12 @@
 # Changelog
 
 ## Unreleased
+- SD link no longer sends the camera a silent audio stream (0.4.3-dev.17). It still offers two-way audio
+  like the phone app but sends nothing, which cuts our packets to the camera to about a quarter. In every
+  stall so far, the camera first stopped answering our checks while still sending its own, and then
+  stopped acknowledging our data: what we send stops reaching it. New option `sd_send_audio` (off) brings
+  the old behaviour back. The log now says when that happens. A second session no longer waits 35 s for a
+  video frame from a camera that is already awake.
 - One SD recording no longer costs the rest of the batch (0.4.3-dev.16). Some recordings' requests are
   never acknowledged by the camera, and that blocks the whole data channel. The bridge now closes that
   session and fetches the remaining recordings in a fresh one, trying the stuck recording last there by

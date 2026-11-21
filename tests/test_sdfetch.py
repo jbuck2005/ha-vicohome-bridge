@@ -313,7 +313,7 @@ def test_a_blocking_recording_gets_the_rest_a_fresh_session(monkeypatch):
             sessions.append(self)
 
         async def connect(self): pass
-        async def prepare(self): pass
+        async def prepare(self, frame_wait=35): pass
         async def close(self): pass
         async def list_segments(self, lo, hi): return seg
 
@@ -335,3 +335,24 @@ def test_clip_paths_lists_every_local_form():
     item = {"downloadUrl": "/dc/download/mp4/a.mp4?sn=S", "videoUrl": "https://cloud.example/x.mp4"}
     assert sdfetch._clip_paths(item, "a.mp4", "S") == [("downloadUrl", "/dc/download/mp4/a.mp4?sn=S"),
                                                        ("name", "/dc/video/mp4/a.mp4?sn=S")]
+
+
+def test_deaf_camera_detection(monkeypatch):
+    import time as _t
+    now = _t.time()
+    sdfetch.net_reset()
+    sdfetch.NET.update({"out_req": 5, "in_resp": 2, "last_in_resp": now - 8, "last_in_req": now - 1})
+    assert sdfetch._deaf()
+    sdfetch.NET.update({"last_in_req": now - 10})    # the camera went quiet too: not one-way
+    assert not sdfetch._deaf()
+    sdfetch.NET.update({"last_in_req": now - 1, "in_resp": 4})
+    assert not sdfetch._deaf()                       # only one unanswered check
+
+
+def test_send_audio_option():
+    import bridge
+    bridge.sd_tuning({})
+    assert sdfetch.SEND_AUDIO[0] is False
+    bridge.sd_tuning({"sd_send_audio": True})
+    assert sdfetch.SEND_AUDIO[0] is True
+    bridge.sd_tuning({})
