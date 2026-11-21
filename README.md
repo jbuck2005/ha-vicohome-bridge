@@ -53,8 +53,8 @@ What was looked at to go higher (November 2026):
   they wouldn't change the rating.
 - **No host networking.** The rating would go to the top, because the add-on opens no ports. In 0.4.3-dev.3 the
   link to the camera got through Home Assistant's NAT and the card listing came back, but the connection
-  dropped once a clip download started. The same drop then happened with host networking. The camera stops
-  answering ICE consent checks while it streams a clip, so NAT wasn't to blame (fixed in 0.4.3-dev.5). Host
+  dropped once a clip download started. The same drop then happened with host networking. The camera appears
+  to stop answering ICE consent checks while it streams a clip, so NAT wasn't to blame (fixed in 0.4.3-dev.5). Host
   networking stays until the SD link is proven without it on a real camera.
 
 ## Licence

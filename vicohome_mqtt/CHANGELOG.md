@@ -1,9 +1,9 @@
 # Changelog
 
 ## Unreleased
-- Fixed: an SD card clip that took more than about 30 s to arrive was cut off. The camera appears to stop answering
-  ICE consent checks while it streams a clip, and the WebRTC library closed the link after six unanswered
-  checks (`Consent to send expired`, then `no data`). The link now stays open, and the log says once when
+- Fixed: an SD card clip that took more than about 30 s to arrive was cut off. The camera appears to stop
+  answering ICE consent checks while it streams a clip, and the WebRTC library closed the link after six
+  unanswered checks (`Consent to send expired`, then `no data`). The link now stays open, and the log says once when
   the camera stops answering. The bridge's own timeouts still end a session that has really died.
 - While a clip comes off the card, the log shows its progress every 10 s, e.g. `sdfetch: <file>: 640 of
   1957 kB after 20 s`.
