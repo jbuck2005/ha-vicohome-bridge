@@ -354,7 +354,11 @@ class _Tunnel:
         await send({"method": "AUTH", "accessToken": data["accessToken"], "version": "0.0.1",
                     "id": uid, "clientType": "app", "status": "normal"})
         self._reader = asyncio.ensure_future(reader())
-        await asyncio.wait_for(dc_open, timeout)
+        try:
+            await asyncio.wait_for(dc_open, timeout)
+        except asyncio.TimeoutError:
+            # Name the stage, so a link that can't reach the camera isn't logged as a bare timeout.
+            raise RuntimeError(f"no link to the camera after {timeout:.0f} s (ICE {pc.iceConnectionState})") from None
 
     async def close(self) -> None:
         try:
