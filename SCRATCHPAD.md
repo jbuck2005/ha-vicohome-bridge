@@ -5,6 +5,26 @@ between sessions. It is never merged into `main` or `edge`.
 
 ---
 
+## 2026-11-21: Planned the local cloud-replacement server
+
+Mapped out what it'd take to replace the Vicohome cloud for a re-provisioned camera. Going through the app's
+endpoints, the camera's whole relationship with the cloud is a small, clean set of calls -- and one is a
+gift: the camera PUSHES its own alarms and snapshots (/device/doalarm + /device/devicePushImage). So local
+visit detection with a picture comes straight from the camera -- no cloud, no SD polling -- which is the
+whole goal, in two endpoints.
+
+The server splits into tidy pieces: bind+keepalive (camera goes online), visits (the alarm+snapshot push,
+fed to the bridge and to un-subscribird for species), live (startlive signalling into the bridge's existing
+WebRTC path), and firmware (otadetail/otaignore -- which the server must always answer "no update" to, so I
+never risk bricking the camera). It emits the same internal events the bridge already handles, so HA/MQTT
+barely changes.
+
+Phased so visits land before I touch live/WebRTC. Everything is capture-driven -- I'm not guessing request
+bodies, I'll build each endpoint from what the camera actually sends once it's pointed at my logging server.
+Which comes back to the reset test unlocking all of it. Full plan in the vicohome-local repo (docs/05).
+
+---
+
 ## 2026-11-21: Built the Pi provisioner + a reset-free way to test it
 
 Decided the shape: for now the goal is just to point the camera at a local listener (my own setup), I'll use
