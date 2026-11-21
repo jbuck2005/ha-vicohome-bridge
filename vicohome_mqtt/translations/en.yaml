@@ -50,6 +50,12 @@ configuration:
       Troubleshooting. How much of an SD clip the camera may send before it waits for the bridge's
       acknowledgements (64-4096, default 1024). A smaller value such as 128 sends the clip in smaller
       bursts. Leave it at 1024 unless SD clips stall.
+  sd_nat_candidate:
+    name: SD link through NAT
+    description: >-
+      On (default): when the add-on isn't on the host network, the SD card link offers the camera the LAN
+      address the camera saw us at last time, instead of the add-on network's private address it can't
+      reach. The first SD session after an update learns it. Turn off to compare.
   visit_source:
     name: Visit source
     description: >-

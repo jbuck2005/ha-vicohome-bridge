@@ -215,3 +215,36 @@ def test_receive_window_option_sets_the_advertised_window():
         assert t._advertised_rwnd == 128 * 1024
     finally:
         sdfetch.RX_WINDOW_KB[0] = 0
+
+
+def test_advertised_candidate_swaps_only_the_private_address():
+    import sdfetch
+
+    line = "candidate:abc 1 udp 2130706431 172.30.33.2 41494 typ host"
+    assert sdfetch._advertised(line, "172.30.33.2", "192.0.2.10") == \
+        "candidate:abc 1 udp 2130706431 192.0.2.10 41494 typ host"
+    assert sdfetch._advertised(line, "172.30.33.2", None) == line
+    assert sdfetch._advertised(line, "198.51.100.1", "192.0.2.10") == line   # not our address: untouched
+
+
+def test_mapped_address_is_read_from_a_check_response():
+    import sdfetch
+    from aioice import stun
+
+    resp = stun.Message(message_method=stun.Method.BINDING, message_class=stun.Class.RESPONSE)
+    resp.attributes["XOR-MAPPED-ADDRESS"] = ("192.0.2.10", 41494)
+    sdfetch.net_reset()
+    sdfetch._stun_count(bytes(resp), "in")
+    assert sdfetch.NET["mapped"] == ("192.0.2.10", 41494) and sdfetch.NET["in_resp"] == 1
+    sdfetch.NET.clear()
+
+
+def test_nat_address_round_trips_through_the_data_file(tmp_path, monkeypatch):
+    import sdfetch
+
+    monkeypatch.setattr(sdfetch, "NAT_FILE", str(tmp_path / "sd_nat_ip"))
+    assert sdfetch._load_nat_ip() is None
+    sdfetch._save_nat_ip("192.0.2.10")
+    assert sdfetch._load_nat_ip() == "192.0.2.10"
+    (tmp_path / "sd_nat_ip").write_text("not an address")
+    assert sdfetch._load_nat_ip() is None
