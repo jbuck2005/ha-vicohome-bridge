@@ -1,6 +1,11 @@
 # Changelog
 
 ## Unreleased
+- Fix: another viewer leaving no longer ends the SD session (0.4.3-dev.20). When our session joins, the
+  camera signs the phone app out, and the "peer left" message for the app was taken as the camera
+  leaving. The bridge then stopped waiting for video and gave up every request at once, which gave the
+  empty card listings and instant failures seen in 0.4.3-dev.16 to dev.19. A PEER_OUT now ends the session only
+  when it names the camera, or names no one after the link is up. The log names the message's fields.
 - Clearer SD log when the card listing is empty (0.4.3-dev.19): it now says whether the camera didn't
   answer the listing or answered with nothing, and when no video frame arrived before the listing, with
   the link statistics for both. The `sd_send_audio` description no longer claims the camera needs the
