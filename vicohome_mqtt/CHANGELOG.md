@@ -1,6 +1,15 @@
 # Changelog
 
 ## Unreleased
+- SD card clips: the camera never took the clip request. In a debug log from a real camera, the card listing
+  came back, but the camera's data channel never acknowledged the GET that followed, while it kept
+  answering ICE. The listing names each file by its full card path, in a dated folder, and carries the
+  camera's own `downloadUrl` and `videoUrl`. The clip request now uses that URL when it points at the
+  camera, and falls back to the old `/dc/video/mp4/<file>` path otherwise. With `log_level: debug` the log
+  shows the URL's form (digits and serial masked) and the request sent.
+- When the camera stops acknowledging a request for 20 s, the bridge gives up on that session instead of
+  waiting out the 90 s clip timeout, and skips the remaining clips in it. The progress line shows how long
+  the request has gone unacknowledged.
 - More SD card logging. The log says when the camera ends the session or closes the data channel, and
   a clip wait stops there instead of running to its timeout. With `log_level: debug` it also shows each
   signalling message and data frame, and the first entry of the card listing.

@@ -5,7 +5,7 @@ recording on the card. The app plays that over a WebRTC data channel: it opens a
 tunnels HTTP requests to the camera ("SafeRtc": a local proxy wraps each request as a data-channel
 message ``{"action":"httpToDevice",...}``; the camera answers with ``AB CD <type> ..`` frames, type
 0x12 a JSON status, 0x16 a body chunk, 0x1a end). The recordings are plain MP4 at
-``/dc/video/mp4/<local-start>.mp4?sn=<serial>`` and the list comes from ``/library/newselectlibrary``
+the listing's own local ``downloadUrl`` (else ``/dc/video/mp4/<file>?sn=<serial>``); the list comes from ``/library/newselectlibrary``
 with ``fromSDCard`` over the tunnel. The camera serves the card only after a ``stopLive`` command.
 
 This runs on the same LAN as the camera (the add-on host), so the media goes peer-to-peer. One live
@@ -22,6 +22,7 @@ import asyncio
 import base64
 import json
 import logging
+import re
 import secrets
 import socket as _socket
 import string
@@ -119,6 +120,32 @@ aioice.ice.get_host_addresses = _host_addresses
 APP_INFO = {"appName": "VicoHome", "appType": "Android", "bundle": "com.smartaddx.vicohome",
             "channelId": 1000, "tenantId": "vicoo", "version": 406000877, "versionName": "4.6.0"}
 LOCAL_ROOT = "https://127.0.0.1:15000"
+_LOCAL_HOSTS = {"", "127.0.0.1", "localhost", "api-local.safemo.com"}
+UNACKED_GIVE_UP_S = 20   # the camera took the link but stopped acknowledging our messages
+
+
+def _clip_path(item: dict, name: str, serial: str) -> str:
+    """The tunnel path to GET for one listed recording.
+
+    The listing's own ``downloadUrl`` / ``videoUrl`` is used when it points at the camera (a relative
+    path or the local tunnel root), so the request is the one the camera itself offers. Anything else,
+    such as a cloud URL, is ignored and the path is built from the file name.
+    """
+    for key in ("downloadUrl", "videoUrl"):
+        u = item.get(key)
+        if not isinstance(u, str) or not u.strip():
+            continue
+        p = urlparse(u.strip())
+        if (p.hostname or "") not in _LOCAL_HOSTS or not p.path.startswith("/"):
+            continue
+        return p.path + (f"?{p.query}" if p.query else "")
+    return f"/dc/video/mp4/{name}?sn={serial}"
+
+
+def _shape(text: str, serial: str) -> str:
+    """A URL with the serial and every digit masked, for debug logs (shows the form, not the clip)."""
+    text = text.replace(serial, "<serial>") if serial else text
+    return re.sub(r"[0-9]", "#", text).replace(".mp#", ".mp4")
 
 
 def _scp_frame(body: bytes, stream_id: int) -> bytes:
@@ -185,6 +212,8 @@ class _Tunnel:
         self.stream = secrets.randbelow(1000)
         self.first_frame = None
         self.done = None
+        self._unacked = None                 # (tsn, since) of the oldest unacknowledged message
+        self.stalled = False                 # the camera stopped acknowledging; the session is no use
 
     # ---- framing / reassembly ----
     def _collected(self) -> dict:
@@ -235,14 +264,33 @@ class _Tunnel:
                 return d
             if self.done is not None and self.done.is_set():
                 break   # the camera ended the session or ICE failed; nothing more will arrive
+            if label and self._unacked_for() >= UNACKED_GIVE_UP_S:
+                # Seen on real hardware: the camera keeps answering ICE but its data channel stops
+                # acknowledging (it never takes the request), so waiting longer brings nothing.
+                self.log.warning("sdfetch: %s: the camera stopped acknowledging our requests for %d s; giving up",
+                                 label, UNACKED_GIVE_UP_S)
+                self.stalled = True
+                break
             if label and time.time() >= next_note:
                 next_note += 10
                 got = len(d["body"]) if d else 0
-                self.log.info("sdfetch: %s: %d of %d kB after %.0f s (%d kB received in all, ICE %s)", label,
-                              got // 1024, self._declared(d) // 1024, time.time() - t0, self._rx_bytes() // 1024,
-                              self.pc.iceConnectionState if self.pc else "-")
+                self.log.info("sdfetch: %s: %d of %d kB after %.0f s (%d kB received in all, ICE %s, request "
+                              "unacknowledged for %.0f s)", label, got // 1024, self._declared(d) // 1024,
+                              time.time() - t0, self._rx_bytes() // 1024,
+                              self.pc.iceConnectionState if self.pc else "-", self._unacked_for())
             await asyncio.sleep(0.3)
         return self._collected().get(sid)
+
+    def _unacked_for(self) -> float:
+        """Seconds the oldest data-channel message has waited for the camera's acknowledgement (0 if none)."""
+        sent = getattr(getattr(self.pc, "sctp", None), "_sent_queue", None)
+        if not sent:
+            self._unacked = None
+            return 0.0
+        tsn = getattr(sent[0], "tsn", None)
+        if not self._unacked or self._unacked[0] != tsn:
+            self._unacked = (tsn, time.time())
+        return time.time() - self._unacked[1]
 
     def _rx_bytes(self) -> int:
         return len(self._buf) + sum(len(c) for c in self.rx[self._seen:]) + self._parsed_bytes
@@ -447,16 +495,25 @@ class _Tunnel:
                 if items and isinstance(items[0], dict):
                     first = items[0]
                     self.log.debug("sdfetch list: first item has %s; traceId %s", sorted(first), first.get("traceId"))
+                    for key in ("downloadUrl", "videoUrl"):
+                        if isinstance(first.get(key), str):
+                            self.log.debug("sdfetch list: %s looks like %s", key, _shape(first[key], self.serial))
                 for it in items:
                     tr = it.get("traceId", "")
                     if tr.endswith(".mp4"):
-                        out.append({"name": tr.rsplit("/", 1)[-1], "period": it.get("period"), "timestamp": it.get("timestamp")})
+                        name = tr.rsplit("/", 1)[-1]
+                        out.append({"name": name, "path": _clip_path(it, name, self.serial),
+                                    "period": it.get("period"), "timestamp": it.get("timestamp")})
             except ValueError:
                 pass
         return out
 
-    async def fetch(self, name: str, timeout: float = 90) -> bytes | None:
-        gid = self._send_http("GET", f"/dc/video/mp4/{name}?sn={self.serial}",
+    async def fetch(self, name: str, timeout: float = 90, path: str | None = None) -> bytes | None:
+        if self.stalled:
+            return None
+        path = path or f"/dc/video/mp4/{name}?sn={self.serial}"
+        self.log.debug("sdfetch: GET %s", _shape(path, self.serial))
+        gid = self._send_http("GET", path,
                               headers=["Accept:*/*", "Connection:close", "Host:127.0.0.1:15000",
                                        "Icy-MetaData:1", "Range:bytes=0-"])
         d = await self._wait(gid, timeout, label=name)
@@ -505,8 +562,9 @@ async def _run(api, serial: str, visits: list[tuple], iface_ip, per_clip_s, log)
         want, shared = assign_segments(seg, visits)
         if shared:
             log.info("sdfetch: %d visit(s) share a recording with a closer visit; they keep their cloud clip", shared)
+        paths = {s["name"]: s.get("path") for s in seg}
         for name, traces in want.items():
-            data = await t.fetch(name, per_clip_s)
+            data = await t.fetch(name, per_clip_s, paths.get(name))
             if data:
                 for trace in traces:
                     out[trace] = data
@@ -529,7 +587,7 @@ async def _poll(api, serial: str, start: float, stop: float, known, max_fetch: i
         seg.sort(key=lambda s: s["timestamp"], reverse=True)   # newest first: they matter most
         log.info("sdpoll: camera lists %d new SD recording(s) since the last poll", len(seg))
         for s in seg[:max_fetch]:
-            s["data"] = await t.fetch(s["name"], per_clip_s)
+            s["data"] = await t.fetch(s["name"], per_clip_s, s.get("path"))
             if not s["data"]:
                 log.warning("sdpoll: no data for %s", s["name"])
         return sorted(seg, key=lambda s: s["timestamp"])
