@@ -19,6 +19,12 @@ pin the runner image.
 
 ---
 
+## 2026-11-21: dev.11 run 1, and the SD window option in the UI (PR #37, 0.4.3-dev.12)
+
+**dev.11 run 1 (no host networking, window 1024):** rcvbuf 8 MB, no UDP drops, SCTP gaps 0. The camera stopped sending data at ~1.8 MB and never retransmitted. It kept sending ICE checks ~10 s more, then went fully silent, and PEER_OUT came at ~60 s. Best fit: our packets (SACKs, check answers) stop reaching the camera, so the NAT on the host is dropping outbound traffic. Not proven yet.
+**Changed (#37, squash-merged):** `sd_rx_window_kb` is a normal option (default 1024), visible in the Configuration tab as "SD receive window (kB)". It was hidden as an optional before, which was a miss. The stats split ICE checks each way (sent / answered, last answer).
+**Next:** SD test at 1024, then at 128. Send both logs.
+
 ## 2026-11-21: Chasing the NAT stall (PR #36 into edge, 0.4.3-dev.11; #35 kept open as the fallback)
 
 **Why:** I want the rating-8 setup to work, not just fall back to host networking.
