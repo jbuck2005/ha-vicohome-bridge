@@ -41,6 +41,20 @@ It publishes the same MQTT topics and entities, so dashboards and automations ke
 This project has no connection with Vicohome. The dashboard assumes a camera named "Bird Cam": replace `bird_cam` with
 your camera's name.
 
+## Security rating
+Home Assistant rates the add-on 5 out of a possible 6 shields. Every add-on starts at 5. The add-on's own AppArmor
+profile adds 1, and host networking takes 1 away. The SD card link needs host networking, because it talks to the
+camera directly on your LAN.
+
+What was looked at to go higher (November 2026):
+
+- **Signed images.** Signing no longer counts. The Supervisor dropped its Codenotary check in 2025.11 and gives
+  no add-on a signing point today, cosign included. Prebuilt images would still make installs faster, but
+  they wouldn't change the rating.
+- **No host networking.** The rating would go to the top, because the add-on opens no ports. In 0.4.3-dev.3 the
+  link to the camera got through Home Assistant's NAT and the card listing came back, but the connection
+  dropped once a clip download started. Host networking stays until that is understood.
+
 ## Licence
 
 MIT, see [LICENSE](LICENSE).

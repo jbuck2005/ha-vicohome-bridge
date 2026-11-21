@@ -497,7 +497,7 @@ def poll_sd_recordings(api, serial: str, start: float, stop: float, known=lambda
     try:
         return asyncio.run(_poll(api, serial, start, stop, known, max_fetch, iface_ip, per_clip_s, log))
     except Exception as err:
-        log.warning("sdpoll: session failed: %s", err)
+        log.warning("sdpoll: session failed: %s", str(err) or err.__class__.__name__)
         return None
 
 
@@ -513,5 +513,5 @@ def fetch_sd_clips(api, serial: str, visits: list[tuple], iface_ip: str | None =
     try:
         return asyncio.run(_run(api, serial, list(visits), iface_ip, per_clip_s, log))
     except Exception as err:
-        log.warning("sdfetch: session failed: %s", err)
+        log.warning("sdfetch: session failed: %s", str(err) or err.__class__.__name__)
         return {}
