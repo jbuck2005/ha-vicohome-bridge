@@ -3,7 +3,8 @@
 ## Unreleased
 - Clearer SD log when the card listing is empty (0.4.3-dev.19): it now says whether the camera didn't
   answer the listing or answered with nothing, and when no video frame arrived before the listing, with
-  the link statistics for both.
+  the link statistics for both. The `sd_send_audio` description no longer claims the camera needs the
+  audio: with it on, the listing came back empty the same way.
 - The SD link sends its silent audio stream again by default (0.4.3-dev.18): without it, the camera never
   answered the card listing. `sd_send_audio` is now on by default.
 - SD link no longer sends the camera a silent audio stream (0.4.3-dev.17). It still offers two-way audio
