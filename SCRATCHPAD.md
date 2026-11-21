@@ -26,7 +26,7 @@ card lists, a clip starts, then aioice logs `Consent to send expired` about 40 s
 I reproduced that exactly with a fake camera that stops answering STUN checks mid-stream. #30 keeps the link
 open when consent checks go unanswered (logs once), and logs clip progress every 10 s. README and changelog
 no longer blame NAT.
-**Status:** PR open, CI running.
+**Status:** squash-merged into edge (0.4.3-dev.5), CI green.
 **Next:** merge, update, repeat the SD test (sd_only, delete one recent clip, restart). Watch the progress lines.
 If it works, bridged networking is worth retrying.
 
