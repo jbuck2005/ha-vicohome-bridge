@@ -19,6 +19,13 @@ pin the runner image.
 
 ---
 
+## 2026-11-21: Chasing the NAT stall (PR #36 into edge, 0.4.3-dev.11; #35 kept open as the fallback)
+
+**Why:** I want the rating-8 setup to work, not just fall back to host networking.
+**Reading of dev.9:** data and the camera's consent replies stopped together, about 11 s after ICE (the consent warning comes 30 s after the first miss). It stalled at ~1.3 MB, close to aiortc's 1 MB SCTP receive window. That fits our SACKs no longer reaching the camera.
+**Changed:** INFO `sdfetch link:` statistics every 2 s and on a stall (packets each way, time since the last one, STUN, socket errors, rcvbuf, netns UDP drops, SCTP TSN/gaps/SACKs; counts only). New `sd_rx_window_kb` option. CI NAT check now streams 8 MB (clean, then with 2% bursty netem loss).
+**Next:** merge, then two SD tests at INFO: default, then `sd_rx_window_kb: 128`. Send both logs.
+
 ## 2026-11-21: NAT breaks the SD transfer midway; host networking back (PR #35, 0.4.3-dev.10)
 
 **Result on dev.9 (no host networking, rating 8):** ICE through NAT ok, listing ok, the clip started (1.3 of 4.7 MB in 10 s), then stalled. Consent stopped at ~33 s and the camera sent PEER_OUT at ~50 s. On host networking the clip is whole in ~14 s.
