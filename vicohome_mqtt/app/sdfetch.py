@@ -145,7 +145,7 @@ def _clip_path(item: dict, name: str, serial: str) -> str:
 def _shape(text: str, serial: str) -> str:
     """A URL with the serial and every digit masked, for debug logs (shows the form, not the clip)."""
     text = text.replace(serial, "<serial>") if serial else text
-    return re.sub(r"[0-9]", "#", text).replace(".mp#", ".mp4")
+    return re.sub(r"[0-9]", "#", text).replace("mp#", "mp4")
 
 
 def _scp_frame(body: bytes, stream_id: int) -> bytes:
