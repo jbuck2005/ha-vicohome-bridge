@@ -5,6 +5,32 @@ between sessions. It is never merged into `main` or `edge`.
 
 ---
 
+## 2026-11-21: Read the Vicohome app to find the local setup path
+
+James is sure a local method exists because the camera has to be set up with the Android app over
+Bluetooth. So I pulled my own copy of the app off my phone and read the Bluetooth + bind code. Notes
+(private, not in this repo) are in the thread.
+
+**How setup works.**
+- The app talks to the camera over a custom GATT service, TLV packets XORed with a session "bleToken".
+- That token comes from a handshake keyed by a pinCode, and the pinCode is just `md5(serial)` folded down
+  to 8 digits. The serial is in the camera's own Bluetooth advertisement. So the whole Bluetooth side is
+  local and reproducible -- no cloud needed to talk to the camera at setup.
+- In setup the app hands the camera, among Wi-Fi and account fields, a field I'll call **cAddr**: the API
+  server address the camera should use. It's just the app's own backend URL.
+
+**What this means.** After the camera joins Wi-Fi it calls home to cAddr: register (`/device/bindcheck`,
+`/device/bindComplete`), heartbeat (`/device/keepalive`), and live sessions (`/device/startlive`, which is
+where the WebRTC signalling the bridge already uses lives). If I re-provision the camera with my own tool
+and point cAddr at a box on my LAN -- and the firmware doesn't pin a cert -- the camera would register and
+stream against my server instead of Vicohome. That's the local-first lever.
+
+**Still unknown / before I try it.** Does the firmware verify the TLS cert on cAddr? Does it accept a bare
+IP, or demand a hostname? And the exact request bodies for keepalive/startlive, which I'd capture from one
+real bind. A test means factory-resetting the camera, so I'm not touching it until I decide to.
+
+---
+
 ## 2026-11-21: LAN probe of the camera (stock firmware)
 
 **What I ran.** `probes/cam_probe.sh` from my Docker host, inside a throwaway container (host network,
