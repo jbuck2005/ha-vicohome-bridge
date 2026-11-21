@@ -73,6 +73,33 @@ def _sp_cm_bigrcv(self, transport):
 
 aioice.ice.StunProtocol.connection_made = _sp_cm_bigrcv
 
+
+# Keep the link up when the camera stops answering ICE consent checks (RFC 7675). aioice closes the
+# connection after six unanswered checks, about 30 s. The camera goes quiet on STUN once it streams a
+# clip, so a clip that takes longer than that was cut off. Our own timeouts still end a dead session.
+CONSENT_LOG_AFTER = 6
+
+
+async def _query_consent_keep(self) -> None:
+    from aioice import stun
+    failures = 0
+    while True:
+        await asyncio.sleep(aioice.ice.CONSENT_INTERVAL * (0.8 + 0.4 * secrets.randbelow(1000) / 1000))
+        for pair in list(self._nominated.values()):
+            try:
+                await pair.protocol.request(self.build_request(pair, nominate=False), pair.remote_addr,
+                                            integrity_key=self.remote_password.encode("utf8"), retransmissions=0)
+                if failures >= CONSENT_LOG_AFTER:
+                    LOG.info("sdfetch: the camera answers ICE consent checks again")
+                failures = 0
+            except stun.TransactionError:
+                failures += 1
+                if failures == CONSENT_LOG_AFTER:
+                    LOG.info("sdfetch: the camera stopped answering ICE consent checks; keeping the link open")
+
+
+aioice.ice.Connection.query_consent = _query_consent_keep
+
 # Gather ICE candidates on the LAN interface only. Patched once here: wrapping the function again on every
 # connect stacked one wrapper per camera wake, and after about a thousand of them ICE hit a RecursionError.
 _get_host_addresses = aioice.ice.get_host_addresses
@@ -153,6 +180,7 @@ class _Tunnel:
         self.rx: list[bytes] = []
         self._seen = 0                       # chunks of rx already parsed into _streams
         self._buf = bytearray()              # unparsed tail (an incomplete frame)
+        self._parsed_bytes = 0               # bytes already parsed out of _buf (for progress logs)
         self._streams: dict[int, dict] = {}
         self.stream = secrets.randbelow(1000)
         self.first_frame = None
@@ -185,6 +213,7 @@ class _Tunnel:
                 d["status"] = pl
             elif typ in (0x12, 0x16):
                 d["body"] += pl
+        self._parsed_bytes += j
         del raw[:j]   # keep only an incomplete frame at the end
         return self._streams
 
@@ -195,14 +224,24 @@ class _Tunnel:
         except ValueError:
             return 0
 
-    async def _wait(self, sid: int, timeout: float):
+    async def _wait(self, sid: int, timeout: float, label: str | None = None):
         t0 = time.time()
+        next_note = t0 + 10
         while time.time() - t0 < timeout:
             d = self._collected().get(sid)
             if d and (d["end"] or (self._declared(d) and len(d["body"]) >= self._declared(d))):
                 return d
+            if label and time.time() >= next_note:
+                next_note += 10
+                got = len(d["body"]) if d else 0
+                self.log.info("sdfetch: %s: %d of %d kB after %.0f s (%d kB received in all, ICE %s)", label,
+                              got // 1024, self._declared(d) // 1024, time.time() - t0, self._rx_bytes() // 1024,
+                              self.pc.iceConnectionState if self.pc else "-")
             await asyncio.sleep(0.3)
         return self._collected().get(sid)
+
+    def _rx_bytes(self) -> int:
+        return len(self._buf) + sum(len(c) for c in self.rx[self._seen:]) + self._parsed_bytes
 
     def _send_cmd(self, action: str, params=None) -> int:
         self.stream = (self.stream + 1) % 0xFFFF
@@ -406,7 +445,7 @@ class _Tunnel:
         gid = self._send_http("GET", f"/dc/video/mp4/{name}?sn={self.serial}",
                               headers=["Accept:*/*", "Connection:close", "Host:127.0.0.1:15000",
                                        "Icy-MetaData:1", "Range:bytes=0-"])
-        d = await self._wait(gid, timeout)
+        d = await self._wait(gid, timeout, label=name)
         if not d or not d["status"]:
             return None
         dl = self._declared(d)

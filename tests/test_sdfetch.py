@@ -89,3 +89,42 @@ def test_ice_interface_filter_is_installed_once():
         assert aioice.ice.get_host_addresses is sdfetch._host_addresses
     finally:
         sdfetch._ICE_IFACE[0] = None
+
+
+def test_unanswered_consent_checks_keep_the_link_open(monkeypatch):
+    """The camera stops answering ICE consent checks while it streams a clip; the link must stay up."""
+    import asyncio
+    from aioice import stun
+
+    class Proto:
+        calls = 0
+
+        async def request(self, *a, **k):
+            Proto.calls += 1
+            raise stun.TransactionError()
+
+    class Pair:
+        protocol, remote_addr = Proto(), ("192.0.2.9", 9)
+
+    class Conn:
+        _nominated = {1: Pair()}
+        remote_password = "pw"
+        closed = False
+
+        def build_request(self, pair, nominate):
+            return object()
+
+        async def close(self):
+            Conn.closed = True
+
+    monkeypatch.setattr(aioice.ice, "CONSENT_INTERVAL", 0.001)
+    assert aioice.ice.Connection.query_consent is sdfetch._query_consent_keep
+
+    async def run():
+        task = asyncio.ensure_future(sdfetch._query_consent_keep(Conn()))
+        while Proto.calls < 3 * sdfetch.CONSENT_LOG_AFTER:
+            await asyncio.sleep(0.001)
+        task.cancel()
+
+    asyncio.run(run())
+    assert not Conn.closed

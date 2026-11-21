@@ -1,11 +1,18 @@
 # Changelog
 
 ## Unreleased
+- Fixed: an SD card clip that took more than about 30 s to arrive was cut off. The camera appears to stop
+  answering ICE consent checks while it streams a clip, and the WebRTC library closed the link after six
+  unanswered checks (`Consent to send expired`, then `no data`). The link now stays open, and the log says once when
+  the camera stops answering. The bridge's own timeouts still end a session that has really died.
+- While a clip comes off the card, the log shows its progress every 10 s, e.g. `sdfetch: <file>: 640 of
+  1957 kB after 20 s`.
 - Tried and reverted: running without host networking (0.4.3-dev.3). Dropping `host_network` would raise
   the security rating from 5 to the top of the scale. On a real camera, the SD card link got through ICE
   over the add-on network's NAT and the card listing came back. But the link went silent as soon as the
-  first clip download started, and ICE consent expired about 30 s later. A test camera in CI didn't do this.
-  0.4.3-dev.4 brings host networking back. See "Security rating" in the README.
+  first clip download started, and ICE consent expired about 30 s later. 0.4.3-dev.4 brought host
+  networking back, and the same thing happened there, so NAT wasn't the cause (see the consent fix above).
+  Running without host networking can be tried again on top of that fix. See "Security rating" in the README.
 - A failed SD session names the error's type when the error has no message, instead of logging
   `session failed:` with nothing after it.
 - Fixed: SD polling and SD backfill stopped working after about a thousand camera wakes (about ten days with
