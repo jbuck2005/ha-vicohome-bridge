@@ -120,6 +120,15 @@ re-made 9, unchanged 2, gone from the cloud 1`, and the same counts are in the `
 attribute of `sensor.<cam>_clip_storage`.
 An automation can also publish a number of hours to `<base_topic>/clips/refetch`, e.g. `6`.
 
+### Testing the SD card link
+`button.<cam>_test_sd_fetch` (under the camera's Diagnostic entities) fetches each camera's 2 newest
+visits from its SD card right away, even if their clips are already saved, and saves them over the old
+ones. It ignores `sd_fetch_hours`, the retry limit and the `cloud_first` rule, and doesn't move the next
+regular backfill. With `clip_source: cloud_only` there's no button and the camera is never woken. Each
+press wakes the camera and briefly signs the phone app out, like any SD fetch. The log shows the link as it
+runs and ends with `SD test: camera ... gave N of M clip(s)`. An automation can publish a number of clips
+per camera (1 to 6) to `<base_topic>/clips/sd_test` instead.
+
 ## Security (AppArmor)
 The add-on runs under its own AppArmor profile (`apparmor.txt`). It may run Python, ffmpeg and ffprobe,
 write only to `/data`, `/tmp`, `/media` and `<config>/www`, and open IP sockets for MQTT, the cloud and
