@@ -1,8 +1,11 @@
 # Changelog
 
 ## Unreleased
-- Host networking is back (0.4.3-dev.3 ran the add-on on the add-on network). Reverted while the SD card
-  link without host networking is checked on a real camera.
+- Tried and reverted: running without host networking (0.4.3-dev.3). Dropping `host_network` would raise
+  the security rating from 5 to the top of the scale. On a real camera, the SD card link got through ICE
+  over the add-on network's NAT and the card listing came back. But the link went silent as soon as the
+  first clip download started, and ICE consent expired about 30 s later. A test camera in CI didn't do this.
+  0.4.3-dev.4 brings host networking back. See "Security rating" in the README.
 - A failed SD session names the error's type when the error has no message, instead of logging
   `session failed:` with nothing after it.
 - Fixed: SD polling and SD backfill stopped working after about a thousand camera wakes (about ten days with
