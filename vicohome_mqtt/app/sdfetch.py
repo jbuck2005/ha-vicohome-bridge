@@ -341,18 +341,13 @@ def _deaf() -> bool:
     return unanswered >= 2 and bool(last_resp) and now - last_resp >= 6 and bool(last_req) and now - last_req < 3
 
 
-def _peer_out_is_camera(msg: dict, serial: str, linked: bool) -> bool:
-    """Whether a PEER_OUT means the camera itself left. One that names a peer other than the camera is
-    another viewer. One that names nobody counts only once our link is up: before that it is most
-    likely the phone app being signed out as our session joins."""
-    named = [v for k, v in msg.items() if k != "method" and isinstance(v, str)
-             and any(w in k.lower() for w in ("client", "peer", "sender", "name", "id"))
-             and not any(w in k.lower() for w in ("group", "session", "trace", "recipient"))]
-    if serial in named:
-        return True
-    if named:
-        return False
-    return linked
+def _peer_out_fields(msg: dict, serial: str) -> tuple:
+    """The field names of a PEER_OUT, and those whose value is the camera's serial. Names only, never
+    values, so the log carries no ids. A PEER_OUT doesn't reliably say who left: on real hardware one
+    naming the camera arrived 4 s before our link came up, and the link then worked (0.4.3-dev.20)."""
+    fields = sorted(k for k in msg if k != "method")
+    camera = [k for k in fields if msg.get(k) == serial]
+    return fields, camera
 
 
 def _kinds(d) -> str:
@@ -679,6 +674,7 @@ class _Tunnel:
         @self.channel.on("close")
         def _close():
             self.log.info("sdfetch: the camera closed the data channel")
+            self.done.set()
 
         @self.channel.on("message")
         def _msg(m):
@@ -778,12 +774,16 @@ class _Tunnel:
                     await pc.addIceCandidate(cand)
                 else:
                     pending.append(cand)
-            elif method == "PEER_OUT" and not _peer_out_is_camera(msg, self.serial, dc_open.done()):
-                # Another viewer leaving, e.g. the phone app that our session just signed out. Ending on it
-                # stopped the wait for video and every request at once (0.4.3-dev.16 to dev.19).
-                self.log.info("sdfetch: another viewer left the camera (fields: %s); carrying on",
-                              ", ".join(sorted(k for k in msg if k != "method")) or "-")
-            elif method in ("PEER_OUT", "NEED_REAUTH"):
+            elif method == "PEER_OUT":
+                # Never ends the session by itself: a PEER_OUT is also sent when another viewer (the phone
+                # app our session signs out) leaves, and it can name the camera even then. Ending on it
+                # stopped the wait for video and every request at once (0.4.3-dev.16 to dev.20). The link
+                # decides instead: the data channel closing, ICE failing, or the stall timeouts.
+                fields, camera = _peer_out_fields(msg, self.serial)
+                self.log.info("sdfetch: PEER_OUT %s the link (fields: %s; the camera's serial in: %s); carrying on",
+                              "after" if dc_open.done() else "before", ", ".join(fields) or "-",
+                              ", ".join(camera) or "none")
+            elif method == "NEED_REAUTH":
                 self.log.info("sdfetch: the camera ended the session (%s)", method)
                 self.done.set()
 

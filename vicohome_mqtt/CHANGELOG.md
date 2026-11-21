@@ -1,6 +1,11 @@
 # Changelog
 
 ## Unreleased
+- A PEER_OUT no longer ends the SD session at all (0.4.3-dev.21). On real hardware dev.20 still ended a
+  session on one that named the camera, 4 s before the link came up, and the link then came up fine; the
+  listing then gave up at once, as in dev.16 to dev.19. The session now ends when the camera closes the
+  data channel, ICE fails, or a request stalls. The log names a PEER_OUT's fields (never their values)
+  and which of them hold the camera's serial.
 - Fix: another viewer leaving no longer ends the SD session (0.4.3-dev.20). When our session joins, the
   camera signs the phone app out, and the "peer left" message for the app was taken as the camera
   leaving. The bridge then stopped waiting for video and gave up every request at once, which gave the
