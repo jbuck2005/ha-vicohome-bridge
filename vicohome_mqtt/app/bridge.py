@@ -31,7 +31,7 @@ from clips import PERIOD_SLACK_S, TRUST_AFTER_S, ClipBudget, ClipMaker, mp4_seco
 from tracker import Tracker
 from vicohome import AuthError, Device, Event, VicohomeClient, VicohomeError
 
-VERSION = "0.4.3-dev.9"
+VERSION = "0.4.3-dev.11"
 LOG = logging.getLogger("vicohome")
 OPTIONS_FILE = "/data/options.json"
 STATE_FILE = "/data/state.json"
@@ -486,6 +486,7 @@ class Bridge:
         self._next_sd_fetch = now + interval * 3600
         try:
             from sdfetch import fetch_sd_clips
+            sd_tuning(getattr(self, "opts", None) or {})
         except Exception as err:
             LOG.warning("SD fetch unavailable (WebRTC deps missing?): %s", err)
             return
@@ -816,6 +817,7 @@ class Bridge:
         start = max(start, now - 24 * 3600)
         try:
             from sdfetch import poll_sd_recordings
+            sd_tuning(getattr(self, "opts", None) or {})
         except Exception as err:
             LOG.warning("SD polling unavailable (WebRTC deps missing?): %s", err)
             return
@@ -975,6 +977,15 @@ class Bridge:
             pass
         self.mqtt.loop_stop()
         self.mqtt.disconnect()
+
+
+def sd_tuning(opts: dict) -> None:
+    """Pass the optional SD link settings to sdfetch (sd_rx_window_kb)."""
+    import sdfetch
+    try:
+        sdfetch.RX_WINDOW_KB[0] = max(0, min(4096, int(opts.get("sd_rx_window_kb") or 0)))
+    except (TypeError, ValueError):
+        sdfetch.RX_WINDOW_KB[0] = 0
 
 
 def main() -> None:

@@ -1,6 +1,18 @@
 # Changelog
 
 ## Unreleased
+- Debugging the SD clip stall without host networking (0.4.3-dev.11, still without host networking).
+  In 0.4.3-dev.9 a clip started through Home Assistant's NAT, then stopped after about 1.3 MB, and the camera
+  stopped answering ICE consent checks at about the same moment. While a clip comes off the card, the log now
+  shows link statistics every 2 s and when data stops: datagrams each way and how long since the last one,
+  STUN messages, socket errors, the receive buffer the kernel granted, the kernel's UDP drop counters, and
+  SCTP progress (received TSN, gaps, our acknowledgements). It shows counts only, no addresses or contents. When the link
+  comes up, the log names the ICE candidate types in use.
+- New troubleshooting option `sd_rx_window_kb`. It sets how much the camera may send before it waits for
+  our acknowledgements (aiortc's default is 1 MB). A smaller window, such as 128, sends a clip in smaller
+  bursts.
+- CI: after ICE through NAT, the fake camera now streams 8 MB, once on a clean link and once with bursty 2%
+  loss, so a link that sets up but stalls during a transfer fails the check.
 - Trying again without host networking (0.4.3-dev.9), now that SD clips work. The add-on runs on Home
   Assistant's add-on network and opens no ports, which should raise the security rating from 5 to the top.
   The SD card link reaches the camera through that network's NAT, which got through ICE and listed the card in

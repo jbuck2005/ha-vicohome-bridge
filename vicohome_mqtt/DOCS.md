@@ -38,6 +38,7 @@ over MQTT (with discovery). Needs the Mosquitto broker add-on and the MQTT integ
 | `save_clips` | true | Turn each visit's clip into an MP4 in `/config/www/<clip_folder>/`, linked as `clip_url` (`/local/...`). |
 | `clip_source` | cloud_first | `cloud_first`: cloud, falling back to the SD card when a cloud clip is incomplete. `sd_only`: always from the SD card (the cloud is still used for events and snapshots). `cloud_only`: never use the card. |
 | `sd_fetch_hours` | 1 | How often the camera may be woken to pull SD clips (1-24 h). Higher = fewer wakes, longer battery life, later SD clips. No effect with `cloud_only`. |
+| `sd_rx_window_kb` | (empty) | Troubleshooting only. How much of an SD clip the camera may send before it waits for the bridge's acknowledgements (default 1024 kB). A smaller value, such as 128, sends the clip in smaller bursts. |
 | `visit_source` | cloud | `cloud`: visits come from the cloud's event list, with species. `sd_poll`: the bridge reads the camera's SD card every `sd_poll_minutes` and each new recording is a visit, with its clip and snapshot from the card but no species. See below. |
 | `sd_poll_minutes` | 60 | With `sd_poll`, minutes between card reads (15-1440). Each read wakes the camera. |
 | `clips_to_keep` | 60 | Starting AND minimum clip limit (newest N clips kept, about 3 MB each). |

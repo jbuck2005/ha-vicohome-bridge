@@ -166,3 +166,52 @@ def test_gives_up_when_the_camera_stops_acknowledging(monkeypatch):
     assert asyncio.run(t._wait(3, 10, label="x.mp4")) is None
     assert t.stalled is True
     assert asyncio.run(t.fetch("y.mp4", 10)) is None   # the rest of the session is skipped
+
+
+def test_link_statistics_count_both_directions_without_addresses():
+    import sdfetch
+
+    class Proto:
+        def __init__(self):
+            self.sent = []
+
+    class Transport:
+        def __init__(self):
+            self.sent = []
+
+        def get_extra_info(self, name):
+            return None
+
+        def sendto(self, data, addr=None):
+            self.sent.append(data)
+
+    sdfetch.net_reset()
+    p = sdfetch.aioice.ice.StunProtocol.__new__(sdfetch.aioice.ice.StunProtocol)
+    p.receiver = type("R", (), {"data_received": lambda self, d, c: None})()
+    p.local_candidate = type("C", (), {"component": 1})()
+    t = Transport()
+    sdfetch._sp_cm_count(p, t)
+    p.transport.sendto(b"\x17" * 100, ("192.0.2.9", 5000))
+    sdfetch._sp_dr_count(p, b"\x17" * 300, ("192.0.2.9", 5000))
+    line = sdfetch.net_stats(None)
+    assert "in 1 pkts" in line and "out 1 pkts" in line and "1 source(s)" in line
+    assert "192.0.2.9" not in line
+    sdfetch.NET.clear()
+
+
+def test_receive_window_option_sets_the_advertised_window():
+    import sdfetch
+
+    sdfetch.RX_WINDOW_KB[0] = 128
+    try:
+        t = sdfetch.RTCSctpTransport.__new__(sdfetch.RTCSctpTransport)
+        t._advertised_rwnd = 1024 * 1024
+        orig = sdfetch._sctp_init
+        sdfetch._sctp_init = lambda self, *a, **k: None
+        try:
+            sdfetch._sctp_init_rwnd(t)
+        finally:
+            sdfetch._sctp_init = orig
+        assert t._advertised_rwnd == 128 * 1024
+    finally:
+        sdfetch.RX_WINDOW_KB[0] = 0
