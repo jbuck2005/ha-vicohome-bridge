@@ -42,22 +42,20 @@ This project has no connection with Vicohome. The dashboard assumes a camera nam
 your camera's name.
 
 ## Security rating
-Every add-on starts at 5 shields out of 6. The add-on's own AppArmor profile adds 1. From 0.4.3-dev.9 it runs on
-Home Assistant's add-on network instead of the host network and opens no ports, which should give it the top
-rating. The SD card link still reaches the camera on your LAN, through the add-on network's NAT.
+The add-on ships its own AppArmor profile, and since 0.4.3 it runs on Home Assistant's add-on network instead of
+the host network and opens no ports. That gives it the top security rating. The SD card link still reaches the
+camera on your LAN, through the add-on network's NAT.
 
-What was looked at to go higher (November 2026):
+What was looked at to get there (November 2026):
 
 - **Signed images.** Signing no longer counts. The Supervisor dropped its Codenotary check in 2025.11 and gives
   no add-on a signing point today, cosign included. Prebuilt images would still make installs faster, but
   they wouldn't change the rating.
-- **No host networking.** The rating would go to the top, because the add-on opens no ports. In 0.4.3-dev.3 the
-  link to the camera got through Home Assistant's NAT and the card listing came back, but no clip arrived.
-  Host networking came back in 0.4.3-dev.4 and the clip still didn't arrive, so host networking was never the
-  cause. The real cause was the clip request: the camera ignored the path the add-on built and only answers
-  the download address it gives in its own card listing (fixed in 0.4.3-dev.7, the first SD clip pulled from a
-  real camera). 0.4.3-dev.9 tries running without host networking again on top of that fix. If an SD clip
-  doesn't come through on a real camera, host networking comes back.
+- **No host networking.** This was the step that mattered. SD clips first seemed to need the host network, but
+  the failures had other causes: the camera only answers the download address in its own card listing (fixed in
+  0.4.3-dev.7), and a "peer left" message, sent when the phone app is signed out as our session joins, was taken
+  as the camera ending the session (fixed in 0.4.3-dev.21). With both fixed, real cameras hand over full clips
+  through the NAT.
 
 ## Licence
 

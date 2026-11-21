@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.3
 - A PEER_OUT no longer ends the SD session at all (0.4.3-dev.21). On real hardware dev.20 still ended a
   session on one that named the camera, 4 s before the link came up, and the link then came up fine; the
   listing then gave up at once, as in dev.16 to dev.19. The session now ends when the camera closes the
