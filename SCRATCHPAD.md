@@ -5,6 +5,17 @@ between sessions. It is never merged into `main` or `edge`.
 
 ---
 
+## 2026-11-21: SD clips work through NAT; 0.4.3 prepared
+
+**Root cause:** the empty card listings from dev.16 on came from PEER_OUT handling. When our session joins, the
+camera signs the phone app out and sends a PEER_OUT, which was taken as the camera ending the session. #47
+(dev.21) never ends the session on a PEER_OUT; the data channel closing, ICE failing or a stall end it instead.
+**Result:** dev.21 without host networking pulled 2 of 2 clips in two Test SD fetch runs in a row, no stalls.
+**Done:** #35 (host networking fallback) closed. #48 into edge sets 0.4.3 (README rating section, RELEASES.md).
+**Next:** merge #48, then the edge -> main release PR; I tag v0.4.3 myself.
+
+---
+
 ## 2026-11-21: Why some GitHub Actions runs failed
 
 **Changed:** Nothing in code. I went through every failed run in both repos. All of them were on PR branches
