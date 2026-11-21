@@ -74,7 +74,8 @@ case "$MODE" in
   *) echo "unknown mode $MODE"; exit 2 ;;
 esac
 
-red() { sed -e "s/$CAM/CAM_IP/g" -e "s/${MAC:-NO_MAC}/CAM_MAC/Ig"; }
+red() { sed -e "s/$CAM/CAM_IP/g" -e "s/ff:ff:ff:ff:ff:ff/BCAST/Ig" -e "s/${MAC:-NO_MAC}/CAM_MAC/Ig" \
+  -e "s/\([0-9a-f]\{2\}:\)\{5\}[0-9a-f]\{2\}/LAN_MAC/Ig"; }
 {
   for f in tcp_asleep tcp_awake; do [ -f $f.txt ] && { say "$f: open ports"; grep -E '^[0-9]+/tcp' $f.txt || echo none; }; done
   [ -f udp_awake.txt ] && { say "UDP open while awake"; grep -E '^[0-9]+/udp +open ' udp_awake.txt || echo none; }
@@ -87,7 +88,7 @@ red() { sed -e "s/$CAM/CAM_IP/g" -e "s/${MAC:-NO_MAC}/CAM_MAC/Ig"; }
   fi
   if [ -f cam.pcap ]; then
     say "Camera packets per minute (wake bursts show here)"
-    tcpdump -nn -tttt -r cam.pcap 2>/dev/null | awk '{print substr($2,1,5)}' | uniq -c | head -120
+    tcpdump -q -nn -tttt -r cam.pcap 2>/dev/null | awk '$2 ~ /^[0-9][0-9]:[0-9][0-9]/ {print substr($2,1,5)}' | uniq -c | head -120
     say "Camera conversations: protocol, local/remote, remote port, packets (remote IPs shown only if private)"
     tcpdump -nn -r cam.pcap "ip" 2>/dev/null | awk -v cam="$CAM" '
       { src=$3; dst=$5; sub(/:$/,"",dst); proto=($0 ~ / UDP| udp/)?"udp":(($0 ~ /Flags/)?"tcp":"other")
@@ -98,7 +99,9 @@ red() { sed -e "s/$CAM/CAM_IP/g" -e "s/${MAC:-NO_MAC}/CAM_MAC/Ig"; }
         key=proto" "dir" "scope" port "port; c[key]++ }
       END { for (k in c) print c[k], k }' | sort -rn | head -40
     say "ARP/other link-layer from the camera"
-    tcpdump -nn -e -r cam.pcap "not ip" 2>/dev/null | awk '{print $NF=="" ? "" : $0}' | sed -E 's/^[0-9:.]+ //' | cut -c1-90 | sort | uniq -c | sort -rn | head -15
+    # -q and the time-stamp filter keep payload/hex lines (e.g. LLC frames carrying text) out of the summary
+    tcpdump -q -nn -e -r cam.pcap "not ip" 2>/dev/null | grep -E '^[0-9]{2}:[0-9]{2}:' | sed -E 's/^[0-9:.]+ //' \
+      | sed -E 's/, length [0-9]+.*//; s/(ARP, Request who-has) .*/\1/; s/(ARP, Reply) ([^ ]+) .*/\1 \2/' | cut -c1-80 | sort | uniq -c | sort -rn | head -15
   fi
   if [ -f lan_bcast.pcap ]; then
     say "Camera's own broadcast/multicast (dst, port: count)"
