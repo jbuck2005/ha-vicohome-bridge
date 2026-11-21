@@ -52,3 +52,54 @@ jobs:
             -c "import paho.mqtt, requests; import vicohome, clips, tracker; print('ok')"
           docker run --rm --platform ${{ matrix.platform }} --entrypoint ffmpeg vicohome_mqtt:ci-${{ matrix.arch }} -version
           docker run --rm --platform ${{ matrix.platform }} --entrypoint ffprobe vicohome_mqtt:ci-${{ matrix.arch }} -version
+
+  apparmor:
+    name: AppArmor profile (end-to-end, enforced)
+    # GitHub's Ubuntu runners have AppArmor on, like Home Assistant OS. Runs the fake-cloud
+    # end-to-end test inside the add-on image with the profile enforced, then fails on any denial.
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: ./vicohome_mqtt
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: vicohome_mqtt:apparmor
+          cache-from: type=gha,scope=amd64
+      - name: Load the profile
+        run: |
+          sudo apparmor_parser -r -W vicohome_mqtt/apparmor.txt
+          sudo grep -x 'vicohome_mqtt (enforce)' /sys/kernel/security/apparmor/profiles
+      - name: Start an anonymous MQTT broker
+        run: |
+          docker run -d --name mqtt -p 1883:1883 eclipse-mosquitto:2 mosquitto -c /mosquitto-no-auth.conf
+          for i in $(seq 1 20); do nc -z 127.0.0.1 1883 && exit 0; sleep 1; done
+          docker logs mqtt; exit 1
+      - name: Run the add-on's mounts and checks under the profile
+        run: |
+          mkdir -p "$RUNNER_TEMP"/{data,media,ha/www}
+          # Supervisor's folders are root-owned; root in the container has no DAC override.
+          chmod 777 "$RUNNER_TEMP"/{data,media,ha,ha/www}
+          echo "# test" > "$RUNNER_TEMP/ha/configuration.yaml"
+          sudo dmesg --clear || true
+          run() {
+            # As Supervisor starts it: --init, host network, the same mounts, the profile.
+            docker run --rm --init --network host --security-opt apparmor=vicohome_mqtt \
+              -v "$RUNNER_TEMP/data:/data" -v "$RUNNER_TEMP/media:/media" -v "$RUNNER_TEMP/ha:/homeassistant" \
+              -v "$PWD/tests:/app/tests:ro" -e MQTT_HOST=127.0.0.1 -e BRIDGE_APP=/app \
+              vicohome_mqtt:apparmor "$@"
+          }
+          run python3 /app/tests/apparmor_ice_check.py
+          run python3 /app/tests/e2e_fake_cloud.py
+      - name: No AppArmor denials
+        if: always()
+        run: |
+          if sudo dmesg | grep 'apparmor="DENIED"' | grep 'profile="vicohome_mqtt'; then
+            echo "::error file=vicohome_mqtt/apparmor.txt::The profile denied something the add-on did (lines above)"
+            exit 1
+          fi
+          echo "no denials"

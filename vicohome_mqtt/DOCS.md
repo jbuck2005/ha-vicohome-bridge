@@ -118,6 +118,14 @@ re-made 9, unchanged 2, gone from the cloud 1`, and the same counts are in the `
 attribute of `sensor.<cam>_clip_storage`.
 An automation can also publish a number of hours to `<base_topic>/clips/refetch`, e.g. `6`.
 
+## Security (AppArmor)
+The add-on runs under its own AppArmor profile (`apparmor.txt`). It may run Python, ffmpeg and ffprobe,
+write only to `/data`, `/tmp`, `/media` and `<config>/www`, and open IP sockets for MQTT, the cloud and
+the camera. It can't read the rest of your Home Assistant config. It uses the host network because the
+SD card link talks to the camera directly on your LAN. If something is blocked, the host log
+(Settings > System > Logs, then **Host**) shows an `apparmor="DENIED"` line naming `vicohome_mqtt` and the
+path; please open an issue with that line (remove anything private from it first).
+
 ## How it differs from the original vicohome-bridge add-on
 - Only **new** events are published, oldest first, so "last" is always the newest visit
   (the old add-on re-sent the whole day newest-first, leaving the oldest one as "last").
