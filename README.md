@@ -43,8 +43,8 @@ your camera's name.
 
 ## Security rating
 Home Assistant rates the add-on 5 out of a possible 6 shields. Every add-on starts at 5. The add-on's own AppArmor
-profile adds 1, and host networking takes 1 away. The SD card link needs host networking, because it talks to the
-camera directly on your LAN.
+profile adds 1, and host networking takes 1 away. The add-on runs on the host network for the SD card link,
+which talks to the camera directly on your LAN.
 
 What was looked at to go higher (November 2026):
 
@@ -52,10 +52,12 @@ What was looked at to go higher (November 2026):
   no add-on a signing point today, cosign included. Prebuilt images would still make installs faster, but
   they wouldn't change the rating.
 - **No host networking.** The rating would go to the top, because the add-on opens no ports. In 0.4.3-dev.3 the
-  link to the camera got through Home Assistant's NAT and the card listing came back, but the connection
-  dropped once a clip download started. The same drop then happened with host networking. The camera appears
-  to stop answering ICE consent checks while it streams a clip, so NAT wasn't to blame (fixed in 0.4.3-dev.5). Host
-  networking stays until the SD link is proven without it on a real camera.
+  link to the camera got through Home Assistant's NAT and the card listing came back, but no clip arrived.
+  Host networking came back in 0.4.3-dev.4 and the clip still didn't arrive, so host networking was never the
+  cause. The real cause was the clip request: the camera ignored the path the add-on built and only answers
+  the download address it gives in its own card listing (fixed in 0.4.3-dev.7, the first SD clip pulled from a
+  real camera). Running without host networking is worth trying again on top of that fix. Until it is proven on
+  a real camera, host networking stays.
 
 ## Licence
 

@@ -1,6 +1,13 @@
 # Changelog
 
 ## Unreleased
+- Confirmed on a real camera (0.4.3-dev.7): the first SD card clip pulled end to end, about 3.9 MB in about
+  14 s, which replaced a short cloud clip with the full 20 s recording. The camera answers only the
+  `downloadUrl` from its own card listing (`/dc/download/...`). The path the add-on used to build was never
+  accepted, which is why no SD clip had arrived before. That also corrects two earlier guesses below: NAT
+  (0.4.3-dev.3) and host networking were not the cause, and the ICE consent change (0.4.3-dev.5) kept the
+  link open but wasn't what stopped the clip.
+- Debug logs no longer mask the `4` in `mp4` path segments.
 - SD card clips: the camera never took the clip request. In a debug log from a real camera, the card listing
   came back, but the camera's data channel never acknowledged the GET that followed, while it kept
   answering ICE. The listing names each file by its full card path, in a dated folder, and carries the

@@ -143,7 +143,7 @@ def test_clip_path_ignores_cloud_urls_and_falls_back():
 
 
 def test_shape_masks_serial_and_digits():
-    assert _shape("/dc/x/2026-01-02.mp4?sn=TESTSERIAL", "TESTSERIAL") == "/dc/x/####-##-##.mp4?sn=<serial>"
+    assert _shape("/dc/x/mp4/2026-01-02.mp4?sn=TESTSERIAL", "TESTSERIAL") == "/dc/x/mp4/####-##-##.mp4?sn=<serial>"
 
 
 def test_gives_up_when_the_camera_stops_acknowledging(monkeypatch):
