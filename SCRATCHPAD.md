@@ -19,6 +19,19 @@ pin the runner image.
 
 ---
 
+## 2026-11-21: SD fetch cut off by ICE consent (PR #30 into edge, 0.4.3-dev.5)
+
+**Changed:** dev.4 (host networking) failed the same way as dev.3, so NAT wasn't the cause. ICE completes, the
+card lists, a clip starts, then aioice logs `Consent to send expired` about 40 s after ICE and closes the link.
+I reproduced that exactly with a fake camera that stops answering STUN checks mid-stream. #30 keeps the link
+open when consent checks go unanswered (logs once), and logs clip progress every 10 s. README and changelog
+no longer blame NAT.
+**Status:** PR open, CI running.
+**Next:** merge, update, repeat the SD test (sd_only, delete one recent clip, restart). Watch the progress lines.
+If it works, bridged networking is worth retrying.
+
+---
+
 ## 2026-11-21: Host networking back (PR #29 into edge, 0.4.3-dev.4)
 
 **Changed:** my real SD test on 0.4.3-dev.3 failed. Through NAT, ICE completed and the camera listed its card,
