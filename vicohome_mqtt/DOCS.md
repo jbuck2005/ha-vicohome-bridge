@@ -96,8 +96,8 @@ network (the same path the app uses). `clip_source` chooses how it is used:
 live session at a time), so it costs battery. `sd_fetch_hours` (1-24, default 1) sets how often the camera may
 be woken for SD clips: **a low value wakes it often and can noticeably shorten a battery camera's run time**, a
 higher value is gentler but makes SD-sourced clips appear later. Each wake pulls up to a few clips at once, and
-`cloud_first` only wakes the camera when a clip is actually incomplete. The add-on runs on the host network for
-the peer-to-peer link, so the Home Assistant host must be on the camera's LAN.
+`cloud_first` only wakes the camera when a clip is actually incomplete. The peer-to-peer link goes from the
+add-on to the camera's LAN address, so the Home Assistant host must be on the camera's LAN.
 
 ### Self-sizing clip limit (daily audit)
 Just after local midnight the bridge audits the previous day (only days it saw completely):
@@ -121,8 +121,8 @@ An automation can also publish a number of hours to `<base_topic>/clips/refetch`
 ## Security (AppArmor)
 The add-on runs under its own AppArmor profile (`apparmor.txt`). It may run Python, ffmpeg and ffprobe,
 write only to `/data`, `/tmp`, `/media` and `<config>/www`, and open IP sockets for MQTT, the cloud and
-the camera. It can't read the rest of your Home Assistant config. It uses the host network because the
-SD card link talks to the camera directly on your LAN. If something is blocked, the host log
+the camera. It can't read the rest of your Home Assistant config. It runs on Home Assistant's add-on
+network, not the host network, and opens no ports. If something is blocked, the host log
 (Settings > System > Logs, then **Host**) shows an `apparmor="DENIED"` line naming `vicohome_mqtt` and the
 path; please open an issue with that line (remove anything private from it first).
 
