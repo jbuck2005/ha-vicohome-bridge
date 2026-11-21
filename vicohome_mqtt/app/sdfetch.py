@@ -396,7 +396,7 @@ STALL_NOTE_S = 3         # note once when no data has arrived for this long
 UNACKED_GIVE_UP_S = 20   # the camera took the link but stopped acknowledging our messages
 RESUME_AFTER_S = 6       # a clip that gets nothing new for this long is asked for again from where it stopped
 RESUMES = 3              # at most this many times per clip
-SEND_AUDIO = [False]     # sd_send_audio: send the camera a silent audio stream, as before 0.4.3-dev.17
+SEND_AUDIO = [True]      # sd_send_audio: send the camera a silent audio stream (off broke the listing in dev.17)
 SESSIONS = 2             # sessions per run: a recording that blocks one gets the rest a fresh session
 
 
