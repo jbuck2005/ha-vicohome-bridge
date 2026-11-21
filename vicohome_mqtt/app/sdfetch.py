@@ -812,7 +812,8 @@ class _Tunnel:
         try:
             await asyncio.wait_for(asyncio.shield(self.first_frame), frame_wait)
         except asyncio.TimeoutError:
-            self.log.debug("sdfetch: no live frame; continuing")
+            self.log.info("sdfetch: no video frame from the camera in %.0f s (audio %s); continuing: %s",
+                          frame_wait, "sent" if SEND_AUDIO[0] else "not sent", net_stats(self.pc))
         await asyncio.sleep(1)
         self._send_cmd("stopLive", {})
         await asyncio.sleep(1)
@@ -844,6 +845,12 @@ class _Tunnel:
                                     "period": it.get("period"), "timestamp": it.get("timestamp")})
             except ValueError:
                 pass
+        if not out:
+            if not d or not d["status"]:
+                self.log.info("sdfetch: the camera didn't answer the card listing in 15 s: %s", net_stats(self.pc))
+            else:
+                self.log.info("sdfetch: the card listing came back empty (%d bytes; %s)", len(d["body"]),
+                              _shape(d["status"].decode(errors="replace")[:120], self.serial))
         return out
 
     async def fetch(self, name: str, timeout: float = 90, path: str | None = None) -> bytes | None:
