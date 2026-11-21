@@ -1,6 +1,11 @@
 # Changelog
 
 ## Unreleased
+- `sd_rx_window_kb` now shows in the add-on's Configuration tab with its default (1024), instead of being a
+  hidden optional setting (0.4.3-dev.12).
+- SD link statistics split the ICE checks each way: how many checks we sent and how many the camera answered
+  (with the time of the last answer), and how many checks the camera sent and we answered. That tells our
+  packets no longer reaching the camera apart from the camera going quiet.
 - Debugging the SD clip stall without host networking (0.4.3-dev.11, still without host networking).
   In 0.4.3-dev.9 a clip started through Home Assistant's NAT, then stopped after about 1.3 MB, and the camera
   stopped answering ICE consent checks at about the same moment. While a clip comes off the card, the log now

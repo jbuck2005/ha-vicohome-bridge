@@ -31,7 +31,7 @@ from clips import PERIOD_SLACK_S, TRUST_AFTER_S, ClipBudget, ClipMaker, mp4_seco
 from tracker import Tracker
 from vicohome import AuthError, Device, Event, VicohomeClient, VicohomeError
 
-VERSION = "0.4.3-dev.11"
+VERSION = "0.4.3-dev.12"
 LOG = logging.getLogger("vicohome")
 OPTIONS_FILE = "/data/options.json"
 STATE_FILE = "/data/state.json"
@@ -93,7 +93,7 @@ def load_options() -> dict[str, Any]:
         "save_images": True, "media_folder": "vicohome", "retention_days": 30,
         "motion_seconds": 60, "log_level": "info",
         "save_clips": True, "clips_to_keep": 60, "clips_max": 600, "clip_folder": "vicohome",
-        "clip_source": "cloud_first", "sd_fetch_hours": 1,
+        "clip_source": "cloud_first", "sd_fetch_hours": 1, "sd_rx_window_kb": 1024,
         "visit_source": "cloud", "sd_poll_minutes": SD_POLL_MINUTES_DEFAULT,
         "mqtt_host": "", "mqtt_port": 1883, "mqtt_username": "", "mqtt_password": "",
     }
@@ -983,9 +983,9 @@ def sd_tuning(opts: dict) -> None:
     """Pass the optional SD link settings to sdfetch (sd_rx_window_kb)."""
     import sdfetch
     try:
-        sdfetch.RX_WINDOW_KB[0] = max(0, min(4096, int(opts.get("sd_rx_window_kb") or 0)))
+        sdfetch.RX_WINDOW_KB[0] = max(64, min(4096, int(opts.get("sd_rx_window_kb") or 1024)))
     except (TypeError, ValueError):
-        sdfetch.RX_WINDOW_KB[0] = 0
+        sdfetch.RX_WINDOW_KB[0] = 1024
 
 
 def main() -> None:
