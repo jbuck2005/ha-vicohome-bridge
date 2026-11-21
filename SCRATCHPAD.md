@@ -25,7 +25,7 @@ pin the runner image.
 but the link went silent as soon as the first clip download started (no data, consent checks unanswered,
 consent expired about 30 s later). The aiortc fake camera never did that. #29 reverts #28 and makes an empty
 `session failed:` log name the error type.
-**Status:** PR open. Note SD fetch hasn't been proven on host networking + AppArmor + the #26 changes either.
+**Status:** squash-merged into edge, CI green. README now has a "Security rating" section. Note SD fetch hasn't been proven on host networking + AppArmor + the #26 changes either.
 **Next:** update to dev.4 and repeat the same SD test (sd_only, delete one recent clip, restart). If it works,
 NAT is the cause and bridged mode stays parked; if it fails too, the problem is in dev.1/dev.2.
 
