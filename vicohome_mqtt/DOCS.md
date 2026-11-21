@@ -38,6 +38,9 @@ over MQTT (with discovery). Needs the Mosquitto broker add-on and the MQTT integ
 | `save_clips` | true | Turn each visit's clip into an MP4 in `/config/www/<clip_folder>/`, linked as `clip_url` (`/local/...`). |
 | `clip_source` | cloud_first | `cloud_first`: cloud, falling back to the SD card when a cloud clip is incomplete. `sd_only`: always from the SD card (the cloud is still used for events and snapshots). `cloud_only`: never use the card. |
 | `sd_fetch_hours` | 1 | How often the camera may be woken to pull SD clips (1-24 h). Higher = fewer wakes, longer battery life, later SD clips. No effect with `cloud_only`. |
+| `sd_rx_window_kb` | 1024 | Troubleshooting (64-4096). How much of an SD clip the camera may send before it waits for the bridge's acknowledgements (default 1024 kB). A smaller value, such as 128, sends the clip in smaller bursts. |
+| `sd_nat_candidate` | on | Troubleshooting. Without host networking, offer the camera the LAN address it saw us at last time (learnt automatically and kept in the add-on's `/data`), instead of the add-on network's private address. |
+| `sd_send_audio` | on | Troubleshooting. On: the SD card link sends the camera a silent audio stream. Off: it offers two-way audio like the phone app but sends nothing. |
 | `visit_source` | cloud | `cloud`: visits come from the cloud's event list, with species. `sd_poll`: the bridge reads the camera's SD card every `sd_poll_minutes` and each new recording is a visit, with its clip and snapshot from the card but no species. See below. |
 | `sd_poll_minutes` | 60 | With `sd_poll`, minutes between card reads (15-1440). Each read wakes the camera. |
 | `clips_to_keep` | 60 | Starting AND minimum clip limit (newest N clips kept, about 3 MB each). |
@@ -75,8 +78,9 @@ again 2, 5, 15 and 30 minutes later. If it grew, the MP4 is made again under the
 `clip_url` stays the same. Once an hour the bridge also lists the last two days of visits again
 and makes any kept clip that is still shorter than the cloud's video (or missing) again from a
 fresh link, three tries at most; so raising `clips_to_keep` brings back clips of recent visits.
-Note: Home Assistant serves `/config/www` at `/local/` **without a login**. File names are the
-visit's random trace id, so they can't be guessed, but anyone given a link can open it.
+Note: Home Assistant serves `/config/www` at `/local/` **without a login**. Anyone given a link can open
+it. File names are the cloud's trace id for the visit, or, for visits read from the SD card, an id keyed
+with a random secret kept in the add-on's data folder, so a name can't be worked out from the time of a visit.
 Clips are also included in Home Assistant backups (another reason only the newest N are kept).
 
 ### SD card as a clip source
@@ -95,8 +99,8 @@ network (the same path the app uses). `clip_source` chooses how it is used:
 live session at a time), so it costs battery. `sd_fetch_hours` (1-24, default 1) sets how often the camera may
 be woken for SD clips: **a low value wakes it often and can noticeably shorten a battery camera's run time**, a
 higher value is gentler but makes SD-sourced clips appear later. Each wake pulls up to a few clips at once, and
-`cloud_first` only wakes the camera when a clip is actually incomplete. The add-on runs on the host network for
-the peer-to-peer link, so the Home Assistant host must be on the camera's LAN.
+`cloud_first` only wakes the camera when a clip is actually incomplete. The peer-to-peer link goes from the
+add-on to the camera's LAN address, so the Home Assistant host must be on the camera's LAN.
 
 ### Self-sizing clip limit (daily audit)
 Just after local midnight the bridge audits the previous day (only days it saw completely):
@@ -116,6 +120,23 @@ are looked at, so the clip limit holds. The log gets one line, e.g. `Re-fetched 
 re-made 9, unchanged 2, gone from the cloud 1`, and the same counts are in the `last_refetch`
 attribute of `sensor.<cam>_clip_storage`.
 An automation can also publish a number of hours to `<base_topic>/clips/refetch`, e.g. `6`.
+
+### Testing the SD card link
+`button.<cam>_test_sd_fetch` (under the camera's Diagnostic entities) fetches each camera's 2 newest
+visits from its SD card right away, even if their clips are already saved, and saves them over the old
+ones. It ignores `sd_fetch_hours`, the retry limit and the `cloud_first` rule, and doesn't move the next
+regular backfill. With `clip_source: cloud_only` there's no button and the camera is never woken. Each
+press wakes the camera and briefly signs the phone app out, like any SD fetch. The log shows the link as it
+runs and ends with `SD test: camera ... gave N of M clip(s)`. An automation can publish a number of clips
+per camera (1 to 6) to `<base_topic>/clips/sd_test` instead.
+
+## Security (AppArmor)
+The add-on runs under its own AppArmor profile (`apparmor.txt`). It may run Python, ffmpeg and ffprobe,
+write only to `/data`, `/tmp`, `/media` and `<config>/www`, and open IP sockets for MQTT, the cloud and
+the camera. It can't read the rest of your Home Assistant config. It runs on Home Assistant's add-on
+network, not the host network, and opens no ports. If something is blocked, the host log
+(Settings > System > Logs, then **Host**) shows an `apparmor="DENIED"` line naming `vicohome_mqtt` and the
+path; please open an issue with that line (remove anything private from it first).
 
 ## How it differs from the original vicohome-bridge add-on
 - Only **new** events are published, oldest first, so "last" is always the newest visit

@@ -11,6 +11,7 @@ import os
 import time
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlparse
 
 import requests
 
@@ -20,6 +21,9 @@ API_BASES = {
     "us": "https://api-us.vicohome.io",
     "eu": "https://api-eu.vicoo.tech",
 }
+
+# Hosts that get the API token on a download. Matched on the URL's host name, not anywhere in the URL.
+TOKEN_DOMAINS = ("vicohome.io", "vicoo.tech")
 
 # Error codes the API uses when the session is no longer valid.
 AUTH_ERROR_CODES = {-1024, -1025, -1026, -1027}
@@ -202,6 +206,15 @@ class VicohomeClient:
         except OSError as err:
             LOG.warning("Could not cache the API token: %s", err)
 
+    def _auth_headers(self, url: str) -> dict[str, str]:
+        """The token only for the API's own hosts over HTTPS (and the configured API base); signed storage links
+        need none, and a host that merely has "vicohome.io" somewhere in its URL must not get it."""
+        parts = urlparse(url)
+        host = (parts.hostname or "").lower()
+        ours = host == (urlparse(self.base).hostname or "").lower() or any(
+            host == d or host.endswith("." + d) for d in TOKEN_DOMAINS)
+        return {"Authorization": self._token} if ours and parts.scheme == "https" and self._token else {}
+
     def _post_http(self, url: str, **kwargs: Any) -> requests.Response:
         """POST, retrying once on a fresh connection if the server dropped the old one.
 
@@ -246,9 +259,15 @@ class VicohomeClient:
         except requests.RequestException as err:
             raise VicohomeError(f"{path}: {err.__class__.__name__}") from None
         text = resp.text.lstrip()
-        if not text.startswith("{"):
-            raise AuthError(f"{path}: non-JSON response (HTTP {resp.status_code})")
-        body = resp.json()
+        if resp.status_code in (401, 403):
+            raise AuthError(f"{path}: HTTP {resp.status_code}")
+        try:
+            body = resp.json() if text.startswith("{") else None
+        except ValueError:
+            body = None
+        if not isinstance(body, dict):
+            # An HTML error page from a proxy (502, 503) is an outage, not a bad token: don't log in again for it.
+            raise VicohomeError(f"{path}: non-JSON response (HTTP {resp.status_code})")
         code = body.get("code", body.get("result", 0))
         if code not in (0, None):
             msg = str(body.get("msg", ""))
@@ -302,22 +321,24 @@ class VicohomeClient:
 
     def fetch_text(self, url: str, max_bytes: int = 1_000_000) -> str | None:
         """Fetch a small text resource such as an HLS playlist (vicohome.io URLs get the token)."""
-        headers = {"Authorization": self._token} if "vicohome.io" in url or "vicoo.tech" in url else {}
         try:
-            resp = self._session.get(url, timeout=self._timeout, headers=headers)
+            resp = self._session.get(url, timeout=self._timeout, headers=self._auth_headers(url), stream=True)
+            if resp.status_code != 200:
+                LOG.debug("Fetch failed: HTTP %s", resp.status_code)
+                return None
+            data = resp.raw.read(max_bytes + 1, decode_content=True)
         except requests.RequestException as err:
             LOG.debug("Fetch failed: %s", err.__class__.__name__)
             return None
-        if resp.status_code != 200 or len(resp.content) > max_bytes:
-            LOG.debug("Fetch failed: HTTP %s", resp.status_code)
+        if len(data) > max_bytes:
+            LOG.debug("Fetch failed: larger than %d bytes", max_bytes)
             return None
-        return resp.text
+        return data.decode(resp.encoding or "utf-8", "replace")
 
     def download(self, url: str, max_bytes: int = 8_000_000) -> tuple[bytes, str] | None:
         """Fetch an image. Signed cloud URLs need no auth; vicohome.io ones get the token."""
-        headers = {"Authorization": self._token} if "vicohome.io" in url or "vicoo.tech" in url else {}
         try:
-            resp = self._session.get(url, timeout=self._timeout, headers=headers, stream=True)
+            resp = self._session.get(url, timeout=self._timeout, headers=self._auth_headers(url), stream=True)
             if resp.status_code != 200:
                 LOG.warning("Image download failed: HTTP %s", resp.status_code)
                 return None

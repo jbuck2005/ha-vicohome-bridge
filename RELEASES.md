@@ -29,6 +29,35 @@ Releasing, step by step:
 
 ---
 
+## 0.4.3 — 2026-11-21
+
+This release gets SD card clips working without host networking, which gives the add-on Home Assistant's top
+security rating, and fixes the problems found in a review of the code.
+
+**No host networking, and SD clips that arrive.** The add-on now runs on Home Assistant's add-on network, opens no
+ports and ships its own AppArmor profile. Pulling clips off the camera's card took a long chase on a real camera.
+The camera only answers the download address it gives in its own card listing, not a path the bridge builds.
+And when our session joins, the camera signs the phone app out and sends a "peer left" message, which the bridge
+took as the camera ending the session. That cut every request short and gave empty card listings. With both
+fixed, real cameras hand over full clips through the add-on network's NAT.
+
+**Sturdier card transfers.** A clip that stalls part-way is asked for again from the byte it stopped at. A
+recording the camera won't serve no longer holds up the rest of the batch: the bridge finishes the others in a
+fresh session and tries that file last. Large clips are no longer cut off after about 30 s.
+
+**Test SD fetch.** A new button under each camera's Diagnostic entities (or MQTT `<base>/clips/sd_test`) pulls the
+newest clips from the card on demand and logs how it went, so the card link can be checked without waiting for a
+visit.
+
+**Troubleshooting options.** `sd_rx_window_kb`, `sd_nat_candidate` and `sd_send_audio` show in the Configuration
+tab with their defaults. The SD log reports link statistics, progress every 10 s, and why a card listing came
+back empty.
+
+**Review fixes.** Clips read from the card no longer get guessable names. The API token is only sent to the
+Vicohome API's own hosts over HTTPS. SD polling no longer stops after about a thousand camera wakes. Card
+downloads use much less CPU. A full disk skips one clip rather than the rest of the poll. A cloud error page
+counts as a cloud error.
+
 ## 0.4.2 — 2026-11-15
 
 This release lets the camera's microSD card stand in for the cloud's visit list, and tidies up how card

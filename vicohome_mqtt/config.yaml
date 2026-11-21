@@ -1,7 +1,6 @@
 name: "Vicohome MQTT Bridge"
-version: "0.4.2"
+version: "0.4.3"
 slug: "vicohome_mqtt"
-host_network: true
 description: "Vicohome bird-feeder cameras in Home Assistant over MQTT: newest bird, snapshot image, visit events, battery and Wi-Fi."
 url: "https://github.com/jbuck2005/ha-vicohome-bridge"
 arch:
@@ -27,6 +26,9 @@ options:
   save_clips: true
   clip_source: "cloud_first"
   sd_fetch_hours: 1
+  sd_rx_window_kb: 1024
+  sd_nat_candidate: true
+  sd_send_audio: true
   visit_source: "cloud"
   sd_poll_minutes: 60
   clips_to_keep: 60
@@ -48,6 +50,9 @@ schema:
   save_clips: bool
   clip_source: list(cloud_first|sd_only|cloud_only)
   sd_fetch_hours: int(1,24)
+  sd_rx_window_kb: int(64,4096)
+  sd_nat_candidate: bool
+  sd_send_audio: bool
   visit_source: list(cloud|sd_poll)
   sd_poll_minutes: int(15,1440)
   clips_to_keep: int(1,5000)

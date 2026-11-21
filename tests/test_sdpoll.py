@@ -66,6 +66,31 @@ def test_sd_poll_makes_clips_come_from_the_card():
     assert bridge.clip_mode({"visit_source": "cloud", "clip_source": "cloud_only"}) == "cloud_only"
 
 
+@pytest.fixture(autouse=True)
+def _sd_key_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(bridge, "SD_KEY_FILE", str(tmp_path / "sd_key"))
+    monkeypatch.setattr(bridge, "_sd_key", None)
+
+
+def test_trace_id_can_not_be_guessed_from_serial_and_time(tmp_path, monkeypatch):
+    ts = 1_799_999_000
+    t = bridge.sd_trace_id(SERIAL, ts)
+    assert str(ts) not in t and t != bridge.legacy_sd_trace_id(SERIAL, ts)
+    assert len(t) >= 3 + 24
+    key = (tmp_path / "sd_key").read_bytes()
+    assert len(key) == 32 and ((tmp_path / "sd_key").stat().st_mode & 0o777) == 0o600
+    monkeypatch.setattr(bridge, "_sd_key", None)          # a restart reads the same key back
+    assert bridge.sd_trace_id(SERIAL, ts) == t
+    monkeypatch.setattr(bridge, "_sd_key", b"k" * 32)     # another install gets other ids
+    assert bridge.sd_trace_id(SERIAL, ts) != t
+
+
+def test_visits_saved_under_the_old_ids_are_still_known(tmp_path):
+    b = _fake(tmp_path)
+    b.tracker.seen[bridge.legacy_sd_trace_id(SERIAL, NOW - 1800)] = NOW - 1800
+    assert b._sd_known(SERIAL)({"timestamp": NOW - 1800, "period": 20})
+
+
 def test_trace_id_is_stable_safe_and_hides_the_serial():
     t = bridge.sd_trace_id(SERIAL, 1_799_999_000.4)
     assert t == bridge.sd_trace_id(SERIAL, 1_799_999_000.9)
@@ -175,7 +200,7 @@ def test_poll_lists_new_recordings_and_fetches_the_newest(monkeypatch):
             return [{"name": f"{i}.mp4", "timestamp": 1000 + i * 100, "period": 20} for i in range(5)] + \
                    [{"name": "tiny.mp4", "timestamp": 2000, "period": 1}]
 
-        async def fetch(self, name, timeout):
+        async def fetch(self, name, timeout, path=None):
             fetched.append(name)
             return b"mp4:" + name.encode()
 
