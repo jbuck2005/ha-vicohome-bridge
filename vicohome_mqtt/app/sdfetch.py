@@ -73,6 +73,22 @@ def _sp_cm_bigrcv(self, transport):
 
 aioice.ice.StunProtocol.connection_made = _sp_cm_bigrcv
 
+# Gather ICE candidates on the LAN interface only. Patched once here: wrapping the function again on every
+# connect stacked one wrapper per camera wake, and after about a thousand of them ICE hit a RecursionError.
+_get_host_addresses = aioice.ice.get_host_addresses
+_ICE_IFACE: list[str | None] = [None]
+
+
+def _host_addresses(*a, **k):
+    addrs = _get_host_addresses(*a, **k)
+    want = _ICE_IFACE[0]
+    if not want:
+        return addrs
+    return [h for h in addrs if h == want] or [want]
+
+
+aioice.ice.get_host_addresses = _host_addresses
+
 APP_INFO = {"appName": "VicoHome", "appType": "Android", "bundle": "com.smartaddx.vicohome",
             "channelId": 1000, "tenantId": "vicoo", "version": 406000877, "versionName": "4.6.0"}
 LOCAL_ROOT = "https://127.0.0.1:15000"
@@ -135,15 +151,21 @@ class _Tunnel:
         self.pc = None
         self.channel = None
         self.rx: list[bytes] = []
+        self._seen = 0                       # chunks of rx already parsed into _streams
+        self._buf = bytearray()              # unparsed tail (an incomplete frame)
+        self._streams: dict[int, dict] = {}
         self.stream = secrets.randbelow(1000)
         self.first_frame = None
         self.done = None
 
     # ---- framing / reassembly ----
     def _collected(self) -> dict:
-        streams: dict[int, dict] = {}
-        raw = b"".join(self.rx)
-        j = 0
+        """Frames received so far, by stream id. Parsed incrementally: _wait calls this every 0.3 s while a
+        clip of several MB arrives, so only the chunks that came in since the last call are read."""
+        if self._seen < len(self.rx):
+            self._buf += b"".join(self.rx[self._seen:])
+            self._seen = len(self.rx)
+        raw, j = self._buf, 0
         while j + 12 <= len(raw):
             if raw[j:j + 2] != b"\xab\xcd":
                 j += 1
@@ -154,16 +176,17 @@ class _Tunnel:
             ln = struct.unpack(">I", raw[j + 8:j + 12])[0]
             if j + 12 + ln > len(raw):
                 break
-            pl = raw[j + 12:j + 12 + ln]
+            pl = bytes(raw[j + 12:j + 12 + ln])
             j += 12 + ln
-            d = streams.setdefault(sid, {"status": None, "body": b"", "end": False})
+            d = self._streams.setdefault(sid, {"status": None, "body": bytearray(), "end": False})
             if typ == 0x1A:
                 d["end"] = True
             elif typ == 0x12 and fl == 0:
                 d["status"] = pl
             elif typ in (0x12, 0x16):
                 d["body"] += pl
-        return streams
+        del raw[:j]   # keep only an incomplete frame at the end
+        return self._streams
 
     @staticmethod
     def _declared(d) -> int:
@@ -201,9 +224,7 @@ class _Tunnel:
 
     # ---- session ----
     async def connect(self, timeout: float = 45) -> None:
-        if self.iface_ip:
-            orig = aioice.ice.get_host_addresses
-            aioice.ice.get_host_addresses = lambda *a, **k: [h for h in orig(*a, **k) if h == self.iface_ip] or [self.iface_ip]
+        _ICE_IFACE[0] = self.iface_ip   # read by _host_addresses below (one patch, not one per connect)
         ticket = self.api.webrtc_ticket(self.serial)
         data = ticket.get("data") or {}
         if ticket.get("result") != 0 or not data.get("accessToken"):
@@ -379,13 +400,13 @@ class _Tunnel:
 
     async def fetch(self, name: str, timeout: float = 90) -> bytes | None:
         gid = self._send_http("GET", f"/dc/video/mp4/{name}?sn={self.serial}",
-                              headers=["Accept:*/*", "Connection:close", f"Host:127.0.0.1:15000",
+                              headers=["Accept:*/*", "Connection:close", "Host:127.0.0.1:15000",
                                        "Icy-MetaData:1", "Range:bytes=0-"])
         d = await self._wait(gid, timeout)
         if not d or not d["status"]:
             return None
         dl = self._declared(d)
-        return d["body"][:dl] if dl and len(d["body"]) >= dl else None
+        return bytes(d["body"][:dl]) if dl and len(d["body"]) >= dl else None
 
 
 def _match(seg: list[dict], vts: float) -> dict | None:

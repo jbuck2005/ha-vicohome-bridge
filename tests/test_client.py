@@ -6,7 +6,7 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "vicohome_mqtt" / "app"))
 
-from vicohome import VicohomeClient, VicohomeError  # noqa: E402
+from vicohome import AuthError, VicohomeClient, VicohomeError  # noqa: E402
 
 DROPPED = requests.ConnectionError(
     "('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))")
@@ -76,3 +76,30 @@ def test_login_retries_a_dropped_connection(tmp_path):
     assert client.devices() == []
     assert client._token == "new-test-token"
     assert len(client._session.calls) == 3
+
+
+def test_an_html_error_page_is_an_outage_not_a_login_problem(tmp_path):
+    client = make_client(tmp_path, [FakeResponse("<html>502 Bad Gateway</html>", 502)])
+    with pytest.raises(VicohomeError, match="non-JSON") as err:
+        client.devices()
+    assert not isinstance(err.value, AuthError)
+    assert len(client._session.calls) == 1   # no second login round
+
+
+def test_http_401_still_logs_in_again(tmp_path):
+    client = make_client(tmp_path, [FakeResponse("", 401), LOGIN_OK, DEVICES_OK])
+    assert client.devices() == []
+    assert client._token == "new-test-token"
+
+
+@pytest.mark.parametrize("url, gets_token", [
+    ("https://api-us.vicohome.io/x.m3u8", True),
+    ("https://media.vicoo.tech/a.jpg", True),
+    ("http://api-us.vicohome.io/x.m3u8", False),                 # never over plain HTTP
+    ("https://storage.example.com/a.jpg?src=vicohome.io", False),
+    ("https://vicohome.io.example.com/a.jpg", False),
+    ("https://notvicohome.io/a.jpg", False),
+])
+def test_the_token_only_goes_to_the_api_hosts(tmp_path, url, gets_token):
+    client = make_client(tmp_path, [])
+    assert ("Authorization" in client._auth_headers(url)) is gets_token

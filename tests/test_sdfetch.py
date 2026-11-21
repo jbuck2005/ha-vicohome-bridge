@@ -1,7 +1,9 @@
-import sys, struct
+import logging, sys, struct
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "vicohome_mqtt" / "app"))
 
+import aioice.ice  # noqa: E402
+import sdfetch  # noqa: E402
 from sdfetch import _match, assign_segments, segment_name, _Tunnel  # noqa: E402
 from datetime import timezone, timedelta  # noqa: E402
 
@@ -47,8 +49,12 @@ def frame(typ, sid, flags, payload=b""):
     return struct.pack(">HBBHHI", 0xABCD, typ, 0, sid, flags, len(payload)) + payload
 
 
+def tunnel():
+    return _Tunnel(None, "TESTSERIAL", None, logging.getLogger("test"))
+
+
 def test_reassembles_status_body_and_end():
-    t = _Tunnel.__new__(_Tunnel)
+    t = tunnel()
     t.rx = [
         frame(0x12, 7, 0, b'{"httpCode":200,"errorCode":0,"contentLength":6}'),
         frame(0x16, 7, 1, b"abc"),
@@ -59,3 +65,27 @@ def test_reassembles_status_body_and_end():
     assert d["end"] is True
     assert d["body"] == b"abcdef"
     assert _Tunnel._declared(d) == 6
+
+
+def test_parses_chunks_as_they_arrive_even_split_mid_frame():
+    t = tunnel()
+    raw = (frame(0x12, 9, 0, b'{"contentLength":4}') + frame(0x16, 9, 1, b"wxyz") + frame(0x1A, 9, 2, b""))
+    t.rx.append(raw[:15])                 # the status frame, cut short
+    assert 9 not in t._collected()
+    t.rx.append(raw[15:31])
+    assert t._collected()[9]["status"] == b'{"contentLength":4}'
+    t.rx.append(raw[31:])
+    d = t._collected()[9]
+    assert d["body"] == b"wxyz" and d["end"] is True
+    assert t._collected()[9]["body"] == b"wxyz"   # calling again doesn't add the frames twice
+
+
+def test_ice_interface_filter_is_installed_once():
+    # Each connect used to wrap get_host_addresses again; a thousand wakes later ICE hit a RecursionError.
+    assert aioice.ice.get_host_addresses is sdfetch._host_addresses
+    sdfetch._ICE_IFACE[0] = "192.0.2.7"   # what connect() sets; it no longer wraps the function
+    try:
+        assert sdfetch._host_addresses(use_ipv4=True, use_ipv6=False) == ["192.0.2.7"]
+        assert aioice.ice.get_host_addresses is sdfetch._host_addresses
+    finally:
+        sdfetch._ICE_IFACE[0] = None

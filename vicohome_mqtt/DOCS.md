@@ -75,8 +75,9 @@ again 2, 5, 15 and 30 minutes later. If it grew, the MP4 is made again under the
 `clip_url` stays the same. Once an hour the bridge also lists the last two days of visits again
 and makes any kept clip that is still shorter than the cloud's video (or missing) again from a
 fresh link, three tries at most; so raising `clips_to_keep` brings back clips of recent visits.
-Note: Home Assistant serves `/config/www` at `/local/` **without a login**. File names are the
-visit's random trace id, so they can't be guessed, but anyone given a link can open it.
+Note: Home Assistant serves `/config/www` at `/local/` **without a login**. Anyone given a link can open
+it. File names are the cloud's trace id for the visit, or, for visits read from the SD card, an id keyed
+with a random secret kept in the add-on's data folder, so a name can't be worked out from the time of a visit.
 Clips are also included in Home Assistant backups (another reason only the newest N are kept).
 
 ### SD card as a clip source

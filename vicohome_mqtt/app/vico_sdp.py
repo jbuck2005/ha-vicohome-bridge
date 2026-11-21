@@ -257,7 +257,7 @@ def decompress_answer(c: dict, our_offer_sdp: str = None) -> str:
     """Rebuild a full answer SDP from the camera's compact answer."""
     fp_hex = ":".join(f"{b:02X}" for b in base64.b64decode(c["fp"]))
     mids = []
-    L = [f"v=0", f"o=- {c['sid']} {c.get('sv', 2)} IN IP4 127.0.0.1", "s=-", "t=0 0"]
+    L = ["v=0", f"o=- {c['sid']} {c.get('sv', 2)} IN IP4 127.0.0.1", "s=-", "t=0 0"]
 
     def block(mid, kind, payloads):
         mids.append(str(mid))
@@ -281,7 +281,7 @@ def decompress_answer(c: dict, our_offer_sdp: str = None) -> str:
     for kind, desc, cp in order:
         if kind == "application":
             mid, port = desc[0], desc[1]
-            L += [f"m=application 9 UDP/DTLS/SCTP webrtc-datachannel", "c=IN IP4 127.0.0.1",
+            L += ["m=application 9 UDP/DTLS/SCTP webrtc-datachannel", "c=IN IP4 127.0.0.1",
                   "a=rtcp:9 IN IP4 0.0.0.0", f"a=ice-ufrag:{c['ice'][0]}", f"a=ice-pwd:{c['ice'][1]}",
                   "a=ice-options:trickle", f"a=fingerprint:sha-256 {fp_hex}", "a=setup:active",
                   f"a=mid:{mid}", f"a=sctp-port:{port}"]

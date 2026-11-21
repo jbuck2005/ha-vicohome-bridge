@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+- Fixed: SD polling and SD backfill stopped working after about a thousand camera wakes (about ten days with
+  `sd_poll` every 15 minutes) until the add-on was restarted. Each wake added another layer around the
+  network-interface lookup, until it hit Python's recursion limit.
+- Privacy: clips of visits read from the SD card got names that could be guessed (`sd-<camera hash>-<time>`).
+  Home Assistant serves `/local/` without a login, so anyone who had seen one link could find the others by
+  trying times. New SD visits get an id keyed with a random secret kept in the add-on's `/data`. Clips saved
+  under the old names keep them until the clip limit removes them.
+- The API token is only sent to the Vicohome API's own hosts over HTTPS. Before, it went to any URL that
+  just contained `vicohome.io` or `vicoo.tech`.
+- An HTML error page from the cloud (a 502 or 503) is reported as a cloud error. Before, it counted as a
+  rejected token, so the bridge logged in again during every outage.
+- Downloading a clip from the SD card uses much less CPU: the received data is read once, not again every
+  0.3 s.
+- A full disk during an SD backfill skips that clip, rather than stopping the rest of the poll.
+
 ## 0.4.2
 - The add-on now runs on Python 3.15 (was 3.12), and CI tests on 3.15 to match.
 - New option **`visit_source`**: `cloud` (default) or **`sd_poll`**. With `sd_poll` the bridge learns about
