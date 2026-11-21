@@ -385,6 +385,27 @@ STALL_NOTE_S = 3         # note once when no data has arrived for this long
 UNACKED_GIVE_UP_S = 20   # the camera took the link but stopped acknowledging our messages
 RESUME_AFTER_S = 6       # a clip that gets nothing new for this long is asked for again from where it stopped
 RESUMES = 3              # at most this many times per clip
+SESSIONS = 2             # sessions per run: a recording that blocks one gets the rest a fresh session
+
+
+def _clip_paths(item: dict, name: str, serial: str) -> list[tuple[str, str]]:
+    """Every tunnel path one listed recording can be asked for by, best first, as (source, path):
+    the listing's local downloadUrl, then its local videoUrl, then a path built from the name."""
+    out: list[tuple[str, str]] = []
+    for key in ("downloadUrl", "videoUrl"):
+        u = item.get(key)
+        if not isinstance(u, str) or not u.strip():
+            continue
+        p = urlparse(u.strip())
+        if (p.hostname or "") not in _LOCAL_HOSTS or not p.path.startswith("/"):
+            continue
+        path = p.path + (f"?{p.query}" if p.query else "")
+        if path not in (q for _, q in out):
+            out.append((key, path))
+    built = f"/dc/video/mp4/{name}?sn={serial}"
+    if built not in (q for _, q in out):
+        out.append(("name", built))
+    return out
 
 
 def _clip_path(item: dict, name: str, serial: str) -> str:
@@ -798,7 +819,8 @@ class _Tunnel:
                     tr = it.get("traceId", "")
                     if tr.endswith(".mp4"):
                         name = tr.rsplit("/", 1)[-1]
-                        out.append({"name": name, "path": _clip_path(it, name, self.serial),
+                        alts = _clip_paths(it, name, self.serial)
+                        out.append({"name": name, "path": _clip_path(it, name, self.serial), "paths": alts,
                                     "period": it.get("period"), "timestamp": it.get("timestamp")})
             except ValueError:
                 pass
@@ -874,31 +896,59 @@ def assign_segments(seg: list[dict], visits: list[tuple]) -> tuple[dict[str, lis
 
 
 async def _run(api, serial: str, visits: list[tuple], iface_ip, per_clip_s, log) -> dict:
-    t = _Tunnel(api, serial, iface_ip, log)
+    """Fetch the visits' recordings. A recording whose request the camera never acknowledges blocks
+    the whole data channel, so the session is closed and the rest are fetched in a fresh one, with the
+    stuck recording tried last there by its next path (videoUrl, then one built from the name)."""
     out: dict = {}
-    try:
-        await t.connect()
-        await t.prepare()
-        lo = min(v[1] for v in visits) - 60
-        hi = max(v[1] for v in visits) + 60
-        seg = await t.list_segments(lo, hi)
-        log.info("sdfetch: camera lists %d SD segments for the window", len(seg))
-        want, shared = assign_segments(seg, visits)
-        if shared:
-            log.info("sdfetch: %d visit(s) share a recording with a closer visit; they keep their cloud clip", shared)
-        paths = {s["name"]: s.get("path") for s in seg}
-        for name, traces in want.items():
-            data = await t.fetch(name, per_clip_s, paths.get(name))
-            if data:
-                for trace in traces:
-                    out[trace] = data
-                log.info("sdfetch: pulled %s (%d bytes)", name, len(data))
+    want: dict | None = None
+    alts: dict[str, list] = {}
+    stuck: dict[str, int] = {}          # name -> index of the path to try next
+    for session in range(1, SESSIONS + 1):
+        t = _Tunnel(api, serial, iface_ip, log)
+        try:
+            await t.connect()
+            await t.prepare()
+            if want is None:
+                lo = min(v[1] for v in visits) - 60
+                hi = max(v[1] for v in visits) + 60
+                seg = await t.list_segments(lo, hi)
+                log.info("sdfetch: camera lists %d SD segments for the window", len(seg))
+                want, shared = assign_segments(seg, visits)
+                if shared:
+                    log.info("sdfetch: %d visit(s) share a recording with a closer visit; they keep their cloud clip",
+                             shared)
+                alts = {s["name"]: s.get("paths") or [("listing", s.get("path"))] for s in seg}
+            todo = [n for n in want if n not in stuck] + [n for n in want if n in stuck]
+            for name in todo:
+                if any(tr in out for tr in want[name]):
+                    continue
+                paths = alts.get(name) or [("name", None)]
+                i = stuck.get(name, 0)
+                if i >= len(paths):
+                    continue
+                src, path = paths[i]
+                log.info("sdfetch: GET %s by its %s (%s)", name, src, _shape(path or "", serial))
+                data = await t.fetch(name, per_clip_s, path)
+                if data:
+                    for trace in want[name]:
+                        out[trace] = data
+                    log.info("sdfetch: pulled %s (%d bytes)", name, len(data))
+                elif t.stalled:
+                    stuck[name] = i + 1
+                    log.warning("sdfetch: %s blocked the session; %s", name,
+                                "trying the rest in a new session" if session < SESSIONS else "giving up for now")
+                    break
+                else:
+                    log.warning("sdfetch: no data for %s", name)
+                    stuck[name] = len(paths)   # answered but empty: don't ask again this run
             else:
-                log.warning("sdfetch: no data for %s", name)
-    finally:
-        await t.close()
+                break   # every recording was tried without blocking the session
+        except Exception as err:
+            log.warning("sdfetch: session %d failed: %s", session, str(err) or err.__class__.__name__)
+            break
+        finally:
+            await t.close()
     return out
-
 
 async def _poll(api, serial: str, start: float, stop: float, known, max_fetch: int,
                 iface_ip, per_clip_s, log) -> list[dict]:

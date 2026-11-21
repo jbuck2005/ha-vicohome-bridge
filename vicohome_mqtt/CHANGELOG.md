@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+- One SD recording no longer costs the rest of the batch (0.4.3-dev.16). Some recordings' requests are
+  never acknowledged by the camera, and that blocks the whole data channel. The bridge now closes that
+  session and fetches the remaining recordings in a fresh one, trying the stuck recording last there by
+  its next path (videoUrl, then one built from the name). The log names the path each GET uses.
 - SD clips that stall part-way are asked for again from the byte they stopped at (0.4.3-dev.15), up to 3
   times, after 6 s without data. Through NAT a 4.5 MB clip now came off the card in full at about
   300 kB/s, so the link itself works; the stalls hit single transfers. The log says whether the camera
