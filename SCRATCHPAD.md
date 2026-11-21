@@ -5,6 +5,24 @@ between sessions. It is never merged into `main` or `edge`.
 
 ---
 
+## 2026-11-21: Signed images research (no PR)
+
+**Changed:** nothing in the code. I checked whether signed prebuilt images would earn the last rating point. They
+don't. Supervisor 2025.11.1 removed the Codenotary check, the `codenotary:` field is ignored with a deprecation
+warning, and `signed` is hard-coded to False in the current supervisor source, so no add-on gets the signing point
+today, with Codenotary or cosign. The HA builder can still sign with cosign keyless, but nothing reads it yet.
+Our 5 comes from base 5, +1 AppArmor, -1 host network. The only lever left is dropping host networking (+1, and
+with no ports or ingress another +2), which needs the SD card link to work from a bridged container.
+**If I do prebuilt images anyway, this goes public:** a public GHCR package (download count shown); OCI labels
+(source repo, version, build time); with cosign, a permanent Rekor entry naming the repo, owner id, workflow path,
+branch or tag, commit and run (no email or personal name, since keyless signing uses the workflow's OIDC identity);
+possibly a buildx provenance attestation, which can be turned off.
+**Status:** research only, waiting on my decision.
+**Next:** decide whether to test the bridge without host networking, and whether prebuilt images are worth it for
+install speed alone.
+
+---
+
 ## 2026-11-21: AppArmor profile (PR #27 into edge, 0.4.3-dev.2)
 
 **Changed:** I added `vicohome_mqtt/apparmor.txt` so the add-on's security rating goes from 4 to 5. Host networking
