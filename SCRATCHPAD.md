@@ -5,6 +5,30 @@ between sessions. It is never merged into `main` or `edge`.
 
 ---
 
+## 2026-11-21: Planned the local-first cutover (app + server)
+
+Sat down to plan how to actually go local. The key realisation: the Vicohome app does two separate jobs and
+only one is ongoing. The *app* just provisions the camera once over Bluetooth -- hands it Wi-Fi creds and a
+server address (I'm calling it cAddr). The *server* at that address is what the camera talks to forever
+(register, keepalive, live/WebRTC). So the thing that actually replaces the creepy cloud is a local server,
+which is really an extension of this bridge -- not a throwaway app.
+
+So the plan splits in two: a stripped-down **provisioner** (the "app" part) and a local **cAddr server**.
+I wrote the provisioner's codec and tested it, and a logging server stub, both as prototypes (kept out of
+this repo along with anything from the app).
+
+On whether the provisioner should be a full Android app: it doesn't have to be. For getting my own camera
+local fastest, a small Python/Bluetooth tool reuses the code I've already written. A real stripped-down
+Android app is the better thing *if* I want others to use this -- but I'd build it last, against a server I've
+already proven, not first.
+
+The one thing to settle before building either properly: does the firmware pin its TLS cert? If it does, a
+redirected cAddr gets refused and the whole thing is dead (I'd stay on SD-polling). That's cheap to test --
+one provision at the logging stub plus one factory reset -- so phase 0 is purely de-risking that. I'm building
+everything else first; the camera reset is gated until I'm ready.
+
+---
+
 ## 2026-11-21: Read the Vicohome app to find the local setup path
 
 James is sure a local method exists because the camera has to be set up with the Android app over
