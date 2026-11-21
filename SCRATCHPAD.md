@@ -19,6 +19,12 @@ pin the runner image.
 
 ---
 
+## 2026-11-21: Without host networking again (PR #34 into edge, 0.4.3-dev.9)
+
+**Changed:** I dropped `host_network` again on top of the dev.7 clip-URL fix, since NAT was never the cause. CI runs the add-on on a bridged network and checks ICE through NAT to a fake camera again.
+**Status:** squash-merged into edge, CI green.
+**Next:** update, check that the rating is 6, and run one real SD test with debug logging. If no clip arrives, bring host networking back.
+
 ## 2026-11-21: First SD card clip from a real camera (dev.7 works; PR #33 records it, 0.4.3-dev.8)
 
 **Result:** on 0.4.3-dev.7 my camera served the clip. The request went to the listing's `downloadUrl` (`/dc/download/mp4/<file>?sn=`; `videoUrl` is `/dc/video/mp4/...`). About 3.9 MB arrived in about 14 s, and the visit went from a short cloud clip to the full 20 s from the card. This is the first SD clip we've seen arrive on real hardware.
