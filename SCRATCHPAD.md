@@ -19,6 +19,18 @@ pin the runner image.
 
 ---
 
+## 2026-11-21: Host networking back (PR #29 into edge, 0.4.3-dev.4)
+
+**Changed:** my real SD test on 0.4.3-dev.3 failed. Through NAT, ICE completed and the camera listed its card,
+but the link went silent as soon as the first clip download started (no data, consent checks unanswered,
+consent expired about 30 s later). The aiortc fake camera never did that. #29 reverts #28 and makes an empty
+`session failed:` log name the error type.
+**Status:** PR open. Note SD fetch hasn't been proven on host networking + AppArmor + the #26 changes either.
+**Next:** update to dev.4 and repeat the same SD test (sd_only, delete one recent clip, restart). If it works,
+NAT is the cause and bridged mode stays parked; if it fails too, the problem is in dev.1/dev.2.
+
+---
+
 ## 2026-11-21: No host networking (PR #28 into edge, 0.4.3-dev.3)
 
 **Changed:** I removed `host_network` so the add-on runs on Supervisor's add-on network with no ports, which
