@@ -5,6 +5,24 @@ between sessions. It is never merged into `main` or `edge`.
 
 ---
 
+## 2026-11-21: Built the Pi provisioner + a reset-free way to test it
+
+Decided the shape: for now the goal is just to point the camera at a local listener (my own setup), I'll use
+a Pi that's in Bluetooth range for the first test, and I still want a stripped-down Android app as the
+provisioner eventually -- but that's the last step, built against a server I've already proven, not first.
+
+Built the provisioner as a small Python/Bluetooth tool (plus the matching codec and a logging server), all
+verified locally. Nice bonus: it has read-only commands (scan, info) that do the full handshake and read the
+camera's info **without changing anything**. So before I ever factory-reset the camera I can run those on the
+Pi against the awake camera and confirm my pin + framing are right on the real device. That de-risks the
+Bluetooth side on its own.
+
+The one step that touches the camera -- writing the new server address -- needs a factory reset and an explicit
+--yes, and I'm holding it until I'm ready. Running it answers the big question: does the firmware pin its TLS
+cert, or will it actually talk to my box?
+
+---
+
 ## 2026-11-21: Planned the local-first cutover (app + server)
 
 Sat down to plan how to actually go local. The key realisation: the Vicohome app does two separate jobs and
