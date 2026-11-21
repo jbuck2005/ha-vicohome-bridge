@@ -248,3 +248,15 @@ def test_nat_address_round_trips_through_the_data_file(tmp_path, monkeypatch):
     assert sdfetch._load_nat_ip() == "192.0.2.10"
     (tmp_path / "sd_nat_ip").write_text("not an address")
     assert sdfetch._load_nat_ip() is None
+
+
+def test_link_datagram_kinds():
+    assert sdfetch._kind(b"\x00\x01" + b"\x00" * 18) == "stun"
+    assert sdfetch._kind(b"\x17\xfe\xfd") == "dtls-data" and sdfetch._kind(b"\x15\xfe\xfd") == "dtls-alert"
+    assert sdfetch._kind(bytes([0x81, 205]) + b"\x00" * 10) == "rtcp-nack"
+    assert sdfetch._kind(bytes([0x80, 96]) + b"\x00" * 10) == "rtp"
+    assert sdfetch._kind(b"") == "empty" and sdfetch._kind(b"\xff") == "other"
+    sdfetch.net_reset()
+    sdfetch._count_kind(b"\x17\xfe", "out")
+    sdfetch._count_kind(b"\x17\xfe", "out")
+    assert "kinds in - out dtls-data=2" in sdfetch.net_stats(None)

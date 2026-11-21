@@ -88,7 +88,7 @@ def net_reset() -> None:
     NET.clear()
     NET.update({"in": 0, "in_b": 0, "in_stun": 0, "out": 0, "out_b": 0, "out_stun": 0, "send_err": 0,
                 "sock_err": 0, "last_in": 0.0, "last_out": 0.0, "srcs": set(), "rcvbuf": 0, "sacks": 0,
-                "last_sack": 0.0, "udp0": _udp_counters()})
+                "last_sack": 0.0, "udp0": _udp_counters(), "kinds_in": {}, "kinds_out": {}})
 
 
 def _udp_counters() -> dict:
@@ -99,6 +99,32 @@ def _udp_counters() -> dict:
         return dict(zip(rows[0][1:], (int(v) for v in rows[1][1:]))) if len(rows) >= 2 else {}
     except (OSError, ValueError):
         return {}
+
+
+_RTCP = {200: "sr", 201: "rr", 202: "sdes", 203: "bye", 205: "nack", 206: "pli"}
+_DTLS = {20: "ccs", 21: "alert", 22: "hs", 23: "data"}
+
+
+def _kind(data) -> str:
+    """What a datagram on the link is, by its first bytes (RFC 7983): STUN, DTLS record type, RTCP type
+    or RTP. DTLS "data" carries the SCTP data channel; an "alert" means one side is closing DTLS."""
+    if not data:
+        return "empty"
+    b = data[0]
+    if b < 4:
+        return "stun"
+    if 20 <= b <= 63:
+        return "dtls-" + _DTLS.get(b, "other")
+    if 128 <= b <= 191:
+        pt = data[1] if len(data) > 1 else 0
+        return "rtcp-" + _RTCP.get(pt, str(pt)) if 192 <= pt <= 223 else "rtp"
+    return "other"
+
+
+def _count_kind(data, way: str) -> None:
+    kinds = NET.setdefault("kinds_" + way, {})
+    k = _kind(data)
+    kinds[k] = kinds.get(k, 0) + 1
 
 
 def _is_stun(data) -> bool:
@@ -179,6 +205,7 @@ def _sp_dr_count(self, data, addr):
         NET["last_in"] = time.time()
         NET["in_stun"] += _is_stun(data)
         _stun_count(data, "in")
+        _count_kind(data, "in")
         NET["srcs"].add((addr[0], addr[1]))
     return _sp_dr(self, data, addr)
 
@@ -218,6 +245,7 @@ def _sp_cm_count(self, transport):
             NET["last_out"] = time.time()
             NET["out_stun"] += _is_stun(data)
             _stun_count(data, "out")
+            _count_kind(data, "out")
         try:
             return send(data, addr)
         except Exception:
@@ -298,7 +326,12 @@ def net_stats(pc) -> str:
             f"{NET['send_err']}); our checks {NET.get('out_req', 0)} sent, {NET.get('in_resp', 0)} answered (last answer "
             f"{ago(NET.get('last_in_resp', 0))}); camera checks {NET.get('in_req', 0)} (last {ago(NET.get('last_in_req', 0))}), "
             f"{NET.get('out_resp', 0)} answered; socket errors "
-            f"{NET['sock_err']}; rcvbuf {NET['rcvbuf'] // 1024} kB; udp {drops}; sctp {sc}")
+            f"{NET['sock_err']}; rcvbuf {NET['rcvbuf'] // 1024} kB; udp {drops}; sctp {sc}; "
+            f"kinds in {_kinds(NET.get('kinds_in'))} out {_kinds(NET.get('kinds_out'))}")
+
+
+def _kinds(d) -> str:
+    return " ".join(f"{k}={v}" for k, v in sorted((d or {}).items())) or "-"
 
 
 # Keep the link up when the camera stops answering ICE consent checks (RFC 7675). aioice closes the

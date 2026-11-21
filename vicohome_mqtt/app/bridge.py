@@ -31,7 +31,7 @@ from clips import PERIOD_SLACK_S, TRUST_AFTER_S, ClipBudget, ClipMaker, mp4_seco
 from tracker import Tracker
 from vicohome import AuthError, Device, Event, VicohomeClient, VicohomeError
 
-VERSION = "0.4.3-dev.13"
+VERSION = "0.4.3-dev.14"
 LOG = logging.getLogger("vicohome")
 OPTIONS_FILE = "/data/options.json"
 STATE_FILE = "/data/state.json"
@@ -103,6 +103,20 @@ def load_options() -> dict[str, Any]:
     except FileNotFoundError:
         pass
     return defaults
+
+
+SD_TEST_DEFAULT = 2
+
+
+def sd_test_count(payload: bytes) -> int:
+    """Clips per camera for the SD test: the button sends PRESS (the default); an automation a number."""
+    try:
+        n = float(payload.decode().strip())
+    except (UnicodeDecodeError, ValueError):
+        return SD_TEST_DEFAULT
+    if n != n or n in (float("inf"), float("-inf")):
+        return SD_TEST_DEFAULT
+    return max(1, min(SD_MAX_PER_CYCLE, int(n)))
 
 
 def hours_from(payload: bytes, default: int) -> int:
@@ -195,6 +209,7 @@ class Bridge:
         self.status_topic = f"{self.base}/status"
         self.refetch_topic = f"{self.base}/clips/refetch"
         self.refetch_hours_topic = f"{self.base}/clips/refetch_hours"
+        self.sd_test_topic = f"{self.base}/clips/sd_test"
         self.stop = threading.Event()
         self.discovered: set[str] = set()
         self.device_info: dict[str, Device] = {}
@@ -207,6 +222,7 @@ class Bridge:
         self.lock = threading.Lock()
         self.refetch_hours = REFETCH_HOURS_DEFAULT
         self.refetching = False
+        self.sd_testing = False
         self._refetch_hours_known = False
         self.last_refetch: dict[str, Any] | None = None
         self.clips: ClipMaker | None = None
@@ -244,6 +260,7 @@ class Bridge:
         client.subscribe(f"{self.prefix}/status")
         client.message_callback_add(f"{self.prefix}/status", self._on_ha_status)
         for topic, handler in ((self.refetch_topic, self._on_refetch),
+                               (self.sd_test_topic, self._on_sd_test),
                                (f"{self.refetch_hours_topic}/set", self._on_refetch_hours),
                                (self.refetch_hours_topic, self._on_refetch_hours)):  # retained: restores it
             client.subscribe(topic)
@@ -343,6 +360,10 @@ class Bridge:
             cfg("button", "refetch_clips", {
                 "name": "Re-fetch clips", "icon": "mdi:filmstrip-box-multiple",
                 "command_topic": self.refetch_topic, "payload_press": "PRESS"})
+            if clip_mode(self.opts) != "cloud_only":
+                cfg("button", "sd_test", {
+                    "name": "Test SD fetch", "icon": "mdi:sd", "entity_category": "diagnostic",
+                    "command_topic": self.sd_test_topic, "payload_press": "PRESS"})
             cfg("number", "refetch_hours", {
                 "name": "Re-fetch hours", "icon": "mdi:history", "entity_category": "config",
                 "command_topic": f"{self.refetch_hours_topic}/set", "state_topic": self.refetch_hours_topic,
@@ -501,29 +522,93 @@ class Bridge:
                 continue
             LOG.info("SD backfill: fetching %d full clip(s) from camera %s's card", len(batch), serial)
             got = fetch_sd_clips(self.api, serial, batch, iface_ip=iface, log=LOG)
-            changed = False
-            for trace_id, data in got.items():
-                path = self.clips.path_for(trace_id)
-                tmp = path.with_suffix(".sdpart")
-                try:
-                    path.parent.mkdir(parents=True, exist_ok=True)
-                    tmp.write_bytes(data)
-                    secs = mp4_seconds(tmp)
-                    if secs:
-                        tmp.replace(path)
-                except OSError as err:   # a full disk: skip this clip, keep the rest of the poll going
-                    LOG.warning("SD backfill: could not save %s: %s", trace_id, err)
-                    secs = None
-                finally:
-                    tmp.unlink(missing_ok=True)
-                if not secs:
-                    continue
-                self.tracker.set_field(serial, trace_id, "clip_seconds", secs)
-                self.tracker.set_field(serial, trace_id, "clip_url", self.clips.url_for(trace_id))
-                LOG.info("SD backfill: %s now %.1f s from the card", trace_id, secs)
-                changed = True
-            if changed:
+            if Bridge._save_sd_clips(self, serial, got):
                 self.publish_clip_storage()
+
+    def _save_sd_clips(self, serial: str, got: dict) -> int:
+        """Save clips fetched from the card over the existing ones; returns how many were saved."""
+        saved = 0
+        for trace_id, data in got.items():
+            path = self.clips.path_for(trace_id)
+            tmp = path.with_suffix(".sdpart")
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                tmp.write_bytes(data)
+                secs = mp4_seconds(tmp)
+                if secs:
+                    tmp.replace(path)
+            except OSError as err:   # a full disk: skip this clip, keep the rest of the poll going
+                LOG.warning("SD backfill: could not save %s: %s", trace_id, err)
+                secs = None
+            finally:
+                tmp.unlink(missing_ok=True)
+            if not secs:
+                continue
+            self.tracker.set_field(serial, trace_id, "clip_seconds", secs)
+            self.tracker.set_field(serial, trace_id, "clip_url", self.clips.url_for(trace_id))
+            LOG.info("SD backfill: %s now %.1f s from the card", trace_id, secs)
+            saved += 1
+        return saved
+
+    def _on_sd_test(self, client, userdata, msg) -> None:
+        """The "Test SD fetch" button, or a number of clips from an automation."""
+        if not self.clips:
+            return
+        if self.sd_testing:
+            LOG.info("An SD test fetch is already running")
+            return
+        self.sd_testing = True
+        count = sd_test_count(msg.payload)
+        threading.Thread(target=self.sd_test, args=(count,), daemon=True).start()
+
+    def sd_test(self, count: int) -> dict[str, int] | None:
+        """Fetch each camera's newest visits from the card now, even if their clips exist.
+
+        A test of the SD link: it ignores clip_source cloud_first, sd_fetch_hours and the retry cap,
+        and leaves the regular backfill window alone. cloud_only still never wakes the camera.
+        """
+        try:
+            if clip_mode(self.opts) == "cloud_only":
+                LOG.info("SD test: clip_source is cloud_only, so the camera's card is never used")
+                return None
+            try:
+                from sdfetch import fetch_sd_clips
+                sd_tuning(getattr(self, "opts", None) or {})
+            except Exception as err:
+                LOG.warning("SD fetch unavailable (WebRTC deps missing?): %s", err)
+                return None
+            with self.lock:
+                from collections import defaultdict
+                want = defaultdict(list)
+                for rec in self.tracker.newest(10 ** 6):
+                    if len(want[rec["serial"]]) < count and not self.clips.busy(rec["trace_id"]):
+                        want[rec["serial"]].append((rec["trace_id"], rec["timestamp"]))
+                result = {"cameras": 0, "asked": 0, "saved": 0}
+                if not any(want.values()):
+                    LOG.info("SD test: no visits on record yet to fetch")
+                    return result
+                iface = self._lan_ip()
+                for serial, batch in want.items():
+                    if not batch:
+                        continue
+                    if not self.api.sd_card_present(serial):
+                        LOG.info("SD test: camera %s has no card", serial)
+                        continue
+                    LOG.info("SD test: fetching the newest %d clip(s) from camera %s's card", len(batch), serial)
+                    got = fetch_sd_clips(self.api, serial, batch, iface_ip=iface, log=LOG)
+                    saved = Bridge._save_sd_clips(self, serial, got)
+                    LOG.info("SD test: camera %s gave %d of %d clip(s)", serial, saved, len(batch))
+                    result["cameras"] += 1
+                    result["asked"] += len(batch)
+                    result["saved"] += saved
+                if result["saved"]:
+                    self.publish_clip_storage()
+                return result
+        except Exception:  # a thread of its own: log the bug, keep the bridge going
+            LOG.exception("Unexpected error during the SD test fetch")
+            return None
+        finally:
+            self.sd_testing = False
 
     def sd_polling(self) -> bool:
         return sd_polling(self.opts)

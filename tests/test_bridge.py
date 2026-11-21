@@ -83,3 +83,39 @@ def test_cloud_first_only_fetches_incomplete_short_clips(monkeypatch):
     b = _fake_bridge("cloud_first", 1)
     bridge.Bridge.sd_backfill(b, 1000.0, recs, fresh)
     assert calls == [["short"]]                        # only the incomplete, still-short clip
+
+
+def test_sd_test_count_from_payload():
+    assert bridge.sd_test_count(b"PRESS") == bridge.SD_TEST_DEFAULT
+    assert bridge.sd_test_count(b"3") == 3 and bridge.sd_test_count(b"0") == 1
+    assert bridge.sd_test_count(b"99") == bridge.SD_MAX_PER_CYCLE
+    assert bridge.sd_test_count(b"nan") == bridge.SD_TEST_DEFAULT and bridge.sd_test_count(b"\xff") == 2
+
+
+def test_sd_test_refetches_the_newest_clips_whatever_the_gates(monkeypatch, tmp_path):
+    import threading
+    calls = []
+    monkeypatch.setattr(sdfetch, "fetch_sd_clips",
+                        lambda api, serial, visits, **kw: (calls.append((serial, [t for t, _ in visits])), {})[1])
+    recs = [{"serial": "camA", "trace_id": f"a{i}", "timestamp": 100 - i} for i in range(4)]
+    recs.append({"serial": "camB", "trace_id": "b0", "timestamp": 50, "sd_tries": 9, "clip_seconds": 30})
+    b = _fake_bridge("cloud_first", 24)
+    b._next_sd_fetch = 1e12                       # the regular window is far off: the test ignores it
+    b.lock = threading.Lock()
+    b.sd_testing = True
+    b.tracker = types.SimpleNamespace(set_field=lambda *a: None,
+                                      newest=lambda n: sorted(recs, key=lambda r: -r["timestamp"])[:n])
+    out = bridge.Bridge.sd_test(b, 2)
+    assert calls == [("camA", ["a0", "a1"]), ("camB", ["b0"])]   # newest per camera, tries and clips ignored
+    assert out == {"cameras": 2, "asked": 3, "saved": 0}
+    assert b._next_sd_fetch == 1e12 and b.sd_testing is False
+
+
+def test_sd_test_never_wakes_a_cloud_only_camera(monkeypatch):
+    import threading
+    calls = []
+    monkeypatch.setattr(sdfetch, "fetch_sd_clips", lambda *a, **k: (calls.append(1), {})[1])
+    b = _fake_bridge("cloud_only", 1)
+    b.lock = threading.Lock()
+    b.tracker = types.SimpleNamespace(newest=lambda n: [{"serial": "cam", "trace_id": "v1", "timestamp": 0}])
+    assert bridge.Bridge.sd_test(b, 2) is None and calls == []
