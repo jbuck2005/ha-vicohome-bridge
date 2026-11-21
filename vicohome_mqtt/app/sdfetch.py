@@ -383,6 +383,8 @@ _LOCAL_HOSTS = {"", "127.0.0.1", "localhost", "api-local.safemo.com"}
 STATS_EVERY_S = 2        # link statistics while a clip comes off the card
 STALL_NOTE_S = 3         # note once when no data has arrived for this long
 UNACKED_GIVE_UP_S = 20   # the camera took the link but stopped acknowledging our messages
+RESUME_AFTER_S = 6       # a clip that gets nothing new for this long is asked for again from where it stopped
+RESUMES = 3              # at most this many times per clip
 
 
 def _clip_path(item: dict, name: str, serial: str) -> str:
@@ -516,7 +518,7 @@ class _Tunnel:
         except ValueError:
             return 0
 
-    async def _wait(self, sid: int, timeout: float, label: str | None = None):
+    async def _wait(self, sid: int, timeout: float, label: str | None = None, stall_s: float | None = None):
         t0 = time.time()
         next_note = t0 + 10
         next_stats = t0 + STATS_EVERY_S
@@ -540,6 +542,8 @@ class _Tunnel:
                 return d
             if self.done is not None and self.done.is_set():
                 break   # the camera ended the session or ICE failed; nothing more will arrive
+            if stall_s and d and d["status"] and time.time() - last_change >= stall_s:
+                break   # stalled part-way: the caller asks again from where it stopped
             if label and self._unacked_for() >= UNACKED_GIVE_UP_S:
                 # Seen on real hardware: the camera keeps answering ICE but its data channel stops
                 # acknowledging (it never takes the request), so waiting longer brings nothing.
@@ -801,19 +805,47 @@ class _Tunnel:
         return out
 
     async def fetch(self, name: str, timeout: float = 90, path: str | None = None) -> bytes | None:
+        """GET one clip. If it stalls part-way, ask again with a Range from the byte it stopped at."""
         if self.stalled:
             return None
         path = path or f"/dc/video/mp4/{name}?sn={self.serial}"
         self.log.debug("sdfetch: GET %s", _shape(path, self.serial))
-        gid = self._send_http("GET", path,
-                              headers=["Accept:*/*", "Connection:close", "Host:127.0.0.1:15000",
-                                       "Icy-MetaData:1", "Range:bytes=0-"])
-        d = await self._wait(gid, timeout, label=name)
-        if not d or not d["status"]:
-            return None
-        dl = self._declared(d)
-        return bytes(d["body"][:dl]) if dl and len(d["body"]) >= dl else None
-
+        deadline = time.time() + timeout
+        body, total, tries = bytearray(), 0, 0
+        while True:
+            start = len(body)
+            gid = self._send_http("GET", path,
+                                  headers=["Accept:*/*", "Connection:close", "Host:127.0.0.1:15000",
+                                           "Icy-MetaData:1", f"Range:bytes={start}-"])
+            d = await self._wait(gid, max(5.0, deadline - time.time()), label=name,
+                                 stall_s=RESUME_AFTER_S if tries < RESUMES else None)
+            if not d or not d["status"]:
+                if tries:
+                    self.log.info("sdfetch: %s: the camera didn't answer the request from byte %d", name, start)
+                return None
+            dl = self._declared(d)
+            if not tries:
+                total = dl
+            elif dl == total and start:
+                self.log.info("sdfetch: %s: the camera ignored the range and sent the file from the start", name)
+                body, start = bytearray(), 0
+            elif dl != total - start:
+                self.log.info("sdfetch: %s: the retry came back with %d bytes, expected %d; giving up", name, dl,
+                              total - start)
+                return None
+            elif tries:
+                self.log.info("sdfetch: %s: the camera answered the request from byte %d", name, start)
+            body += d["body"][:dl] if dl else d["body"]
+            if total and len(body) >= total:
+                if tries:
+                    self.log.info("sdfetch: %s: complete after %d retr%s", name, tries, "y" if tries == 1 else "ies")
+                return bytes(body[:total])
+            if (self.stalled or (self.done is not None and self.done.is_set()) or tries >= RESUMES
+                    or time.time() >= deadline or not total):
+                return None
+            tries += 1
+            self.log.info("sdfetch: %s: stalled at %d of %d kB; asking again from there (try %d of %d): %s", name,
+                          len(body) // 1024, total // 1024, tries, RESUMES, net_stats(self.pc))
 
 def _match(seg: list[dict], vts: float) -> dict | None:
     cover = [s for s in seg if s.get("timestamp") and s["timestamp"] - 5 <= vts <= s["timestamp"] + (s["period"] or 20) + 2]
