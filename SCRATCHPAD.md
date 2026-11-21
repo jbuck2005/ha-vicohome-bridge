@@ -19,6 +19,13 @@ pin the runner image.
 
 ---
 
+## 2026-11-21: NAT stall is a timer; offer the camera a reachable address (PR #38 into edge, 0.4.3-dev.13)
+
+**dev.11 run 2 (window 128):** it stalled at ~1.0 MB, ~11 s after link up. Across all three NAT runs, the camera stops 10-14 s after link up, whatever the bytes or window. So it's time-based, not load.
+**Hypothesis:** our only candidate is the add-on network's private address, which the camera can't reach. Its checks to it time out after ~10 s, and then it drops the link.
+**Changed (#38, squash-merged):** the bridge reads XOR-MAPPED-ADDRESS from the camera's check responses, keeps the NAT'd LAN address in /data/sd_nat_ip, and from the next session trickles its candidate at that address (same port). The log says whether we're behind NAT and whether the port was kept. New UI switch "SD link through NAT" (sd_nat_candidate, on).
+**Next:** window back to 1024. SD test twice: the first learns the address (look for "behind NAT ... port kept"), the second is the real test ("advertising the LAN address...").
+
 ## 2026-11-21: dev.11 run 1, and the SD window option in the UI (PR #37, 0.4.3-dev.12)
 
 **dev.11 run 1 (no host networking, window 1024):** rcvbuf 8 MB, no UDP drops, SCTP gaps 0. The camera stopped sending data at ~1.8 MB and never retransmitted. It kept sending ICE checks ~10 s more, then went fully silent, and PEER_OUT came at ~60 s. Best fit: our packets (SACKs, check answers) stop reaching the camera, so the NAT on the host is dropping outbound traffic. Not proven yet.
