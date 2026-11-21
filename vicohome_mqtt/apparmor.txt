@@ -40,7 +40,7 @@ profile vicohome_mqtt flags=(attach_disconnected,mediate_deleted) {
   /usr/share/** r,
   /usr/lib/** rm,
 
-  # Process and CPU information Python, OpenSSL and ffmpeg read about themselves.
+  # Process, CPU and NUMA information Python, OpenSSL and ffmpeg read about themselves.
   owner @{PROC}/@{pid}/** r,
   @{PROC}/cpuinfo r,
   @{PROC}/meminfo r,
@@ -49,6 +49,8 @@ profile vicohome_mqtt flags=(attach_disconnected,mediate_deleted) {
   @{PROC}/sys/kernel/random/* r,
   /sys/devices/system/cpu/ r,
   /sys/devices/system/cpu/** r,
+  /sys/devices/system/node/ r,
+  /sys/devices/system/node/** r,
   /sys/fs/cgroup/cpu.max r,
 
   /dev/null rw,
