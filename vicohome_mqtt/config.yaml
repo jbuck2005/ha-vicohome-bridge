@@ -1,11 +1,13 @@
 name: "Vicohome MQTT Bridge"
-version: "0.4.3-dev.14"
+version: "0.4.3-dev.15"
 slug: "vicohome_mqtt"
 description: "Vicohome bird-feeder cameras in Home Assistant over MQTT: newest bird, snapshot image, visit events, battery and Wi-Fi."
 url: "https://github.com/jbuck2005/ha-vicohome-bridge"
 arch:
   - aarch64
   - amd64
+# TEMPORARY (0.4.3-dev.15): host networking for one A/B test of the SD link; dev.16 removes it.
+host_network: true
 services:
   - mqtt:need
 map:

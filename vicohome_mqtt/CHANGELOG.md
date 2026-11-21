@@ -1,6 +1,9 @@
 # Changelog
 
 ## Unreleased
+- Temporary A/B build (0.4.3-dev.15): host networking is back for one test, with the same code and link
+  statistics as 0.4.3-dev.14, to see whether the camera also stops sending about 12-15 s into a long clip
+  on the host network. The next build takes host networking out again.
 - New "Test SD fetch" button (0.4.3-dev.14), under each camera's Diagnostic entities: it fetches the 2
   newest visits from the card now, even if their clips exist, without waiting for `sd_fetch_hours` or a
   restart. An automation can publish a count (1-6) to `<base_topic>/clips/sd_test`.
