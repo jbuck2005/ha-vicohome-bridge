@@ -297,3 +297,41 @@ def test_fetch_restarts_when_the_camera_ignores_the_range():
     t, sent = _range_tunnel(data, 3000, honour=False)
     assert asyncio.run(t.fetch("c.mp4", 30)) == data   # each retry starts the file over; the last one finishes
     assert sent == [0, 3000, 3000, 3000]
+
+
+def test_a_blocking_recording_gets_the_rest_a_fresh_session(monkeypatch):
+    import asyncio
+    sessions, gets = [], []
+    seg = [{"name": "bad.mp4", "timestamp": 1000, "period": 20, "path": "/dl/bad",
+            "paths": [("downloadUrl", "/dl/bad"), ("videoUrl", "/vid/bad")]},
+           {"name": "good.mp4", "timestamp": 2000, "period": 20, "path": "/dl/good",
+            "paths": [("downloadUrl", "/dl/good")]}]
+
+    class FakeTunnel:
+        def __init__(self, *a):
+            self.stalled = False
+            sessions.append(self)
+
+        async def connect(self): pass
+        async def prepare(self): pass
+        async def close(self): pass
+        async def list_segments(self, lo, hi): return seg
+
+        async def fetch(self, name, timeout, path):
+            gets.append((len(sessions), path))
+            if path.startswith("/dl/bad"):
+                self.stalled = True     # never acknowledged: the session is no use after this
+                return None
+            return b"mp4:" + name.encode()
+
+    monkeypatch.setattr(sdfetch, "_Tunnel", FakeTunnel)
+    out = asyncio.run(sdfetch._run(None, "S", [("vbad", 1000), ("vgood", 2000)], None, 30, logging.getLogger("t")))
+    assert out == {"vgood": b"mp4:good.mp4", "vbad": b"mp4:bad.mp4"}
+    # session 1 blocks on bad; session 2 fetches good first, then bad by its videoUrl
+    assert gets == [(1, "/dl/bad"), (2, "/dl/good"), (2, "/vid/bad")]
+
+
+def test_clip_paths_lists_every_local_form():
+    item = {"downloadUrl": "/dc/download/mp4/a.mp4?sn=S", "videoUrl": "https://cloud.example/x.mp4"}
+    assert sdfetch._clip_paths(item, "a.mp4", "S") == [("downloadUrl", "/dc/download/mp4/a.mp4?sn=S"),
+                                                       ("name", "/dc/video/mp4/a.mp4?sn=S")]
