@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+- SD clips that stall part-way are asked for again from the byte they stopped at (0.4.3-dev.15), up to 3
+  times, after 6 s without data. Through NAT a 4.5 MB clip now came off the card in full at about
+  300 kB/s, so the link itself works; the stalls hit single transfers. The log says whether the camera
+  answers the new request and whether it honours the range.
 - New "Test SD fetch" button (0.4.3-dev.14), under each camera's Diagnostic entities: it fetches the 2
   newest visits from the card now, even if their clips exist, without waiting for `sd_fetch_hours` or a
   restart. An automation can publish a count (1-6) to `<base_topic>/clips/sd_test`.

@@ -260,3 +260,40 @@ def test_link_datagram_kinds():
     sdfetch._count_kind(b"\x17\xfe", "out")
     sdfetch._count_kind(b"\x17\xfe", "out")
     assert "kinds in - out dtls-data=2" in sdfetch.net_stats(None)
+
+
+def _range_tunnel(data, cut, honour=True):
+    """A tunnel whose camera stalls after `cut` bytes of each answer and honours (or ignores) Range."""
+    import asyncio  # noqa: F401
+    t = tunnel()
+    sent = []
+
+    def send_http(method, path, headers=None, body=""):
+        start = int([h for h in headers if h.startswith("Range:")][0].split("=")[1].rstrip("-"))
+        sent.append(start)
+        return len(sent)
+
+    async def wait(sid, timeout, label=None, stall_s=None):
+        start = sent[sid - 1] if honour else 0
+        part = data[start:]
+        body = part if stall_s is None else part[:cut]
+        return {"status": ('{"contentLength":%d}' % len(part)).encode(), "body": bytearray(body), "end": False}
+
+    t._send_http, t._wait = send_http, wait
+    return t, sent
+
+
+def test_fetch_resumes_a_stalled_clip_from_where_it_stopped():
+    import asyncio
+    data = bytes(range(256)) * 40          # 10240 bytes
+    t, sent = _range_tunnel(data, 3000)
+    assert asyncio.run(t.fetch("c.mp4", 30)) == data
+    assert sent == [0, 3000, 6000, 9000]  # three retries, each from the last byte received
+
+
+def test_fetch_restarts_when_the_camera_ignores_the_range():
+    import asyncio
+    data = b"x" * 5000
+    t, sent = _range_tunnel(data, 3000, honour=False)
+    assert asyncio.run(t.fetch("c.mp4", 30)) == data   # each retry starts the file over; the last one finishes
+    assert sent == [0, 3000, 3000, 3000]
