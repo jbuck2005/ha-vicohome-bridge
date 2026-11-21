@@ -1,7 +1,11 @@
 # Changelog
 
 ## Unreleased
-- Trying again without host networking (0.4.3-dev.9), now that SD clips work. The add-on runs on Home
+- Host networking is back (0.4.3-dev.10). Without it (0.4.3-dev.9) an SD clip started through Home
+  Assistant's NAT, then stalled after about 1.3 MB. The camera stopped answering ICE consent checks and ended
+  the session about 50 s in. On host networking the same kind of clip arrives whole in about 14 s. The NAT
+  check in CI only proves the link can be set up, not a sustained transfer, so it is removed again.
+- Tried again without host networking (0.4.3-dev.9, reverted in dev.10), now that SD clips work. The add-on runs on Home
   Assistant's add-on network and opens no ports, which should raise the security rating from 5 to the top.
   The SD card link reaches the camera through that network's NAT, which got through ICE and listed the card in
   0.4.3-dev.3. CI again checks ICE through NAT to a fake camera that has no route back. If a real SD clip
