@@ -19,6 +19,13 @@ pin the runner image.
 
 ---
 
+## 2026-11-21: Camera never accepts the SD clip request (PR #32 into edge, 0.4.3-dev.7)
+
+**Found:** in my dev.6 debug log, ICE stayed up and the card listing came back. Then the camera never acknowledged the clip GET at the data-channel (SCTP) level. aiortc resent it every second for 90 s. Every earlier message was acknowledged. So the camera didn't refuse the request, it never accepted it. The listing entries give the full card path (in a dated folder) and their own `downloadUrl` / `videoUrl`, which we had ignored.
+**Changed:** the GET now uses the listing's local `downloadUrl` (else `videoUrl`, else the old path). After 20 s with no acknowledgement, the session gives up instead of waiting 90 s per clip. Debug logs show the URL's form with digits and the serial masked.
+**Status:** PR #32 open, waiting on CI and my go-ahead.
+**Next:** merge, update, repeat the debug SD test. Look for `sdfetch list: downloadUrl looks like` and `sdfetch: GET` lines, and whether the camera sends a status frame.
+
 ## 2026-11-21: Camera sends nothing for an SD clip (PR #31 into edge, 0.4.3-dev.6)
 
 **Changed:** on dev.5 the link stayed up, but the camera answered the card listing and then sent 0 kB for the
