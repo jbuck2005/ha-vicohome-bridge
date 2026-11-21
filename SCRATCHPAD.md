@@ -19,6 +19,13 @@ pin the runner image.
 
 ---
 
+## 2026-11-21: First SD card clip from a real camera (dev.7 works; PR #33 records it, 0.4.3-dev.8)
+
+**Result:** on 0.4.3-dev.7 my camera served the clip. The request went to the listing's `downloadUrl` (`/dc/download/mp4/<file>?sn=`; `videoUrl` is `/dc/video/mp4/...`). About 3.9 MB arrived in about 14 s, and the visit went from a short cloud clip to the full 20 s from the card. This is the first SD clip we've seen arrive on real hardware.
+**So:** the old built path was never accepted. NAT and host networking weren't the cause, and the consent fix wasn't either.
+**Changed (PR #33):** the CHANGELOG and the README security-rating section now say so. Debug logs no longer mask `mp4`.
+**Next:** retry without host networking on top of dev.7 (rating 5 to 6), with one real SD test. If it fails, revert as before.
+
 ## 2026-11-21: Camera never accepts the SD clip request (PR #32 into edge, 0.4.3-dev.7)
 
 **Found:** in my dev.6 debug log, ICE stayed up and the card listing came back. Then the camera never acknowledged the clip GET at the data-channel (SCTP) level. aiortc resent it every second for 90 s. Every earlier message was acknowledged. So the camera didn't refuse the request, it never accepted it. The listing entries give the full card path (in a dated folder) and their own `downloadUrl` / `videoUrl`, which we had ignored.
