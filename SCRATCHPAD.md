@@ -12,7 +12,8 @@ stays. The profile only lets the container run Python, ffmpeg and ffprobe, write
 `<config>/www`, and open IP, netlink and Unix sockets. The rest of the HA config isn't readable from inside it.
 A new CI job loads the profile in enforce mode, runs the fake-cloud e2e test and a WebRTC/ICE check inside the
 image under it, and fails on any denial.
-**Status:** PR open, waiting on CI. Merge #26 first; #27 then needs the version lines and changelog merged.
+**Status:** #26 and #27 are both squash-merged into edge (0.4.3-dev.2). The first enforced CI run passed every test but
+flagged ffmpeg reading the NUMA node list in `/sys`; I allowed that and the rerun was clean.
 **Next:** after the edge build lands on HA, check the rating shows 5 and the host log has no `apparmor="DENIED"`
 lines for `vicohome_mqtt`, especially after an SD card fetch, which CI can't test.
 
