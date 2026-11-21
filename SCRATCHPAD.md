@@ -19,6 +19,17 @@ pin the runner image.
 
 ---
 
+## 2026-11-21: Camera sends nothing for an SD clip (PR #31 into edge, 0.4.3-dev.6)
+
+**Changed:** on dev.5 the link stayed up, but the camera answered the card listing and then sent 0 kB for the
+clip request in 90 s, and stopped answering STUN about 8 s after it. So consent was a symptom: the camera
+goes quiet on the clip request itself. #31 logs hang-ups and data-channel close (and stops waiting there), and
+at debug level every signalling message, data frame and the first listing entry.
+**Status:** PR open. Asked whether an SD clip ever arrived on my setup.
+**Next:** merge, set log_level debug, repeat the test, read the sdfetch lines.
+
+---
+
 ## 2026-11-21: SD fetch cut off by ICE consent (PR #30 into edge, 0.4.3-dev.5)
 
 **Changed:** dev.4 (host networking) failed the same way as dev.3, so NAT wasn't the cause. ICE completes, the
