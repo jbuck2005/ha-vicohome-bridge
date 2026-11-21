@@ -19,6 +19,13 @@ pin the runner image.
 
 ---
 
+## 2026-11-21: NAT breaks the SD transfer midway; host networking back (PR #35, 0.4.3-dev.10)
+
+**Result on dev.9 (no host networking, rating 8):** ICE through NAT ok, listing ok, the clip started (1.3 of 4.7 MB in 10 s), then stalled. Consent stopped at ~33 s and the camera sent PEER_OUT at ~50 s. On host networking the clip is whole in ~14 s.
+**Guess:** our packets stop reaching the camera partway (no SACKs or consent checks reach it). Possibly NAT conntrack or a burst buffer. Not proven without a debug log.
+**Changed (PR #35):** host networking is back, the NAT CI check is removed, and the README records both tries and the real 1-8 scale (5 with host networking).
+**Next:** merge #35. Optionally run one dev.9 SD test at debug level first, if I want to chase the NAT stall.
+
 ## 2026-11-21: Without host networking again (PR #34 into edge, 0.4.3-dev.9)
 
 **Changed:** I dropped `host_network` again on top of the dev.7 clip-URL fix, since NAT was never the cause. CI runs the add-on on a bridged network and checks ICE through NAT to a fake camera again.
