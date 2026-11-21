@@ -1,6 +1,11 @@
 # Changelog
 
 ## Unreleased
+- The add-on no longer uses the host network. It runs on Home Assistant's own add-on network, like most
+  add-ons, which raises its security rating from 5 to the top of the scale. The SD card link still reaches the
+  camera on the LAN: the camera answers the address it sees the bridge's packets come from. If SD clips or
+  `sd_poll` stop working after this update (the log shows `session failed: no link to the camera`), please
+  open an issue. A backup taken before the update brings back the version with host networking.
 - Fixed: SD polling and SD backfill stopped working after about a thousand camera wakes (about ten days with
   `sd_poll` every 15 minutes) until the add-on was restarted. Each wake added another layer around the
   network-interface lookup, until it hit Python's recursion limit.
@@ -18,9 +23,8 @@
 - The add-on ships its own AppArmor profile, which raises its Home Assistant security rating from 4 to 5.
   The container may now only run Python, ffmpeg and ffprobe, write to `/data`, `/tmp`, `/media` and
   `<config>/www`, and open IP sockets. The rest of the Home Assistant config is no longer readable from
-  inside it. Host networking stays, because the SD card link reaches the camera on the LAN. If a
-  feature stops working, look for `apparmor="DENIED"` lines with `profile="vicohome_mqtt"` in the host's
-  kernel log (Settings > System > Logs > Host).
+  inside it. If a feature stops working, look for `apparmor="DENIED"` lines with
+  `profile="vicohome_mqtt"` in the host's kernel log (Settings > System > Logs > Host).
 
 ## 0.4.2
 - The add-on now runs on Python 3.15 (was 3.12), and CI tests on 3.15 to match.
