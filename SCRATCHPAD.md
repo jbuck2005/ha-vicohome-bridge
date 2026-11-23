@@ -18,9 +18,11 @@ card's full clip replaces it when it arrives; the backfill takes named birds fir
 only counts once the camera answered the card listing; a card clip is never overwritten by a cloud job or a
 re-fetch.
 
-Status: PR open, merging when CI is green. Next: update the edge add-on and check that new visits get clips.
-Still open: the card link stalling through Docker's NAT since host networking was dropped in 0.4.3. That's a
-separate call because it touches the security rating.
+Status: #50 merged into edge. I decided to stay away from host networking, so the SD link has to work without it.
+Looking closer at the log, the camera's sender just stops part-way (no loss, window open, checks answered), then
+it leaves the session ~80 s in and refuses new ones for an hour. #51 (0.4.4-dev.2) re-acknowledges a stalled clip
+before re-asking (a retry restarts the whole file), ends a silent session after 12 s, and logs resent chunks,
+nudge results and how far signalling got. Next: update the edge add-on, run Test SD fetch, read the new lines.
 
 ---
 
