@@ -261,14 +261,49 @@ aioice.ice.StunProtocol.connection_made = _sp_cm_count
 _sctp_sack = RTCSctpTransport._send_sack
 
 
-async def _sctp_sack_count(self):
+async def _sctp_sack_now(self):
+    """Send a SACK now (counted)."""
     if NET:
         NET["sacks"] += 1
         NET["last_sack"] = time.time()
+    self._sack_pkts = 0
     return await _sctp_sack(self)
 
 
-RTCSctpTransport._send_sack = _sctp_sack_count
+# Delayed acknowledgements (RFC 4960 section 6.2): aiortc sends a SACK for every packet it receives, about
+# 300 a second while a clip comes off the card, on top of the audio. On real hardware the camera stopped
+# taking our packets about 4 MB into a session (it kept resending data we had already acknowledged) and
+# then left. The phone app's SCTP stack acknowledges every second packet or after 200 ms, so we do the
+# same, which halves what we send the camera. A gap or a duplicate is still acknowledged at once.
+SACK_EVERY = [2]          # sd_delayed_ack off sets 1: a SACK per packet, as aiortc does
+SACK_DELAY_S = 0.2
+
+
+async def _sctp_sack_delayed(self):
+    if SACK_EVERY[0] <= 1 or self._sack_misordered or self._sack_duplicates:
+        return await _sctp_sack_now(self)
+    self._sack_pkts = getattr(self, "_sack_pkts", 0) + 1
+    if self._sack_pkts >= SACK_EVERY[0]:
+        return await _sctp_sack_now(self)
+    if getattr(self, "_sack_timer", None) is None:
+        self._sack_timer = self._loop.call_later(SACK_DELAY_S, _sack_timer_fired, self)
+
+
+def _sack_timer_fired(self) -> None:
+    self._sack_timer = None
+    if self._sack_needed:
+        asyncio.ensure_future(_sack_flush(self))
+
+
+async def _sack_flush(self) -> None:
+    try:
+        if self._sack_needed:
+            await _sctp_sack_now(self)
+    except Exception:   # the association closed under the timer
+        pass
+
+
+RTCSctpTransport._send_sack = _sctp_sack_delayed
 
 # Data chunks the camera sent again (a TSN we already had). aiortc forgets them after each SACK, so they
 # are counted here for the whole session: retransmissions during a stall mean our acknowledgements are not
@@ -654,10 +689,10 @@ class _Tunnel:
 
     async def _nudge(self) -> None:
         sctp = getattr(self.pc, "sctp", None) if self.pc else None
-        if sctp is None or not hasattr(sctp, "_send_sack"):
+        if sctp is None or not hasattr(sctp, "_sack_misordered"):
             return
         try:
-            await sctp._send_sack()
+            await _sctp_sack_now(sctp)
             NET["nudges"] = NET.get("nudges", 0) + 1
         except Exception as err:   # the association may be closing; the stall handling carries on
             self.log.debug("sdfetch: could not re-acknowledge: %s", err)

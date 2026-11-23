@@ -1,6 +1,11 @@
 # Changelog
 
 ## Unreleased
+- SD link: delayed acknowledgements (0.4.4-dev.3). In the dev.2 logs the camera kept resending data we had
+  already acknowledged and stopped answering our checks about 4 MB into a session, then left: our packets
+  stopped getting through to it. aiortc acknowledged every packet (about 300 a second); the bridge now
+  acknowledges every second packet or after 200 ms, as the phone app's stack does, and still at once on a gap
+  or duplicate. New option `sd_delayed_ack` (on) to turn it off. Not yet proven on the camera.
 - SD link, without host networking (0.4.4-dev.2). On real hardware the camera stopped sending part-way through
   a clip with nothing lost and our receive window open, then left the session about 80 s in and refused new
   ones. The bridge now:

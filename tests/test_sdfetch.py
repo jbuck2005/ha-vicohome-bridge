@@ -370,10 +370,13 @@ def test_a_stalled_clip_gets_a_fresh_acknowledgement_before_a_new_request(monkey
 
     class Sctp:
         _sent_queue = []
+        _sack_misordered = set()
         sent = 0
 
-        async def _send_sack(self):
-            Sctp.sent += 1
+    async def fake_sack(self):
+        Sctp.sent += 1
+
+    monkeypatch.setattr(sdfetch, "_sctp_sack", fake_sack)
 
     class Pc:
         sctp = Sctp()
@@ -417,3 +420,41 @@ def test_signalling_stage_text_has_counts_not_ids():
     text = sdfetch.stage_text({"auth": "ok", "join": "ok", "peer_in": 1, "offers": 2, "answer": False,
                                "candidates": 0, "peer_out": 1})
     assert text == "auth ok, join ok, peer-in 1, offers 2, no answer, 0 candidate(s), peer-out 1"
+
+
+def test_delayed_ack_every_second_packet_and_at_once_on_a_gap(monkeypatch):
+    import asyncio
+    sent = []
+
+    async def fake_sack(self):
+        sent.append(1)
+        self._sack_needed = False
+
+    monkeypatch.setattr(sdfetch, "_sctp_sack", fake_sack)
+    sdfetch.net_reset()
+
+    async def run():
+        s = type("S", (), {})()
+        s._sack_misordered, s._sack_duplicates, s._sack_needed = set(), [], True
+        s._loop = asyncio.get_running_loop()
+        await sdfetch._sctp_sack_delayed(s)           # first packet: wait for a second one
+        assert sent == []
+        await sdfetch._sctp_sack_delayed(s)           # second packet: acknowledge both
+        assert sent == [1]
+        s._sack_needed = True
+        await sdfetch._sctp_sack_delayed(s)           # a lone packet is acknowledged by the timer
+        await asyncio.sleep(sdfetch.SACK_DELAY_S + 0.1)
+        assert sent == [1, 1]
+        s._sack_needed, s._sack_misordered = True, {5}
+        await sdfetch._sctp_sack_delayed(s)           # a gap: at once
+        assert sent == [1, 1, 1]
+    asyncio.run(run())
+    assert sdfetch.NET["sacks"] == 3
+
+
+def test_delayed_ack_option(monkeypatch):
+    import bridge
+    bridge.sd_tuning({"sd_delayed_ack": False})
+    assert sdfetch.SACK_EVERY[0] == 1
+    bridge.sd_tuning({})
+    assert sdfetch.SACK_EVERY[0] == 2
