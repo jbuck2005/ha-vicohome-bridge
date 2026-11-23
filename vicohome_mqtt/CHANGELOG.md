@@ -8,6 +8,7 @@
 - SD backfill fetches named birds first, then the newest visits, so the visits worth watching get the card's clip.
 - A wake where the link never came up no longer uses up the visits' SD tries; a try only counts once the camera
   answered the card listing. A card clip is never overwritten by a later cloud job or a re-fetch.
+- Tests: the link-statistics test's fake ICE receiver now answers aioice 0.14's paired-address check.
 
 ## 0.4.3
 - A PEER_OUT no longer ends the SD session at all (0.4.3-dev.21). On real hardware dev.20 still ended a

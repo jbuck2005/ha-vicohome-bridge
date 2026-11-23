@@ -187,7 +187,8 @@ def test_link_statistics_count_both_directions_without_addresses():
 
     sdfetch.net_reset()
     p = sdfetch.aioice.ice.StunProtocol.__new__(sdfetch.aioice.ice.StunProtocol)
-    p.receiver = type("R", (), {"data_received": lambda self, d, c: None})()
+    p.receiver = type("R", (), {"data_received": lambda self, d, c: None,
+                                 "is_paired": lambda self, p, a: True})()
     p.local_candidate = type("C", (), {"component": 1})()
     t = Transport()
     sdfetch._sp_cm_count(p, t)
