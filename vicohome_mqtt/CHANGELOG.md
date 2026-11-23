@@ -1,6 +1,15 @@
 # Changelog
 
 ## Unreleased
+- SD link, without host networking (0.4.4-dev.2). On real hardware the camera stopped sending part-way through
+  a clip with nothing lost and our receive window open, then left the session about 80 s in and refused new
+  ones. The bridge now:
+  - re-acknowledges what it has 2 s into a stall (a duplicate SACK, harmless) before asking for the clip
+    again, since a retry makes the camera send the whole file from the start;
+  - ends the session after 12 s of total silence from the camera instead of waiting out the clip's timeout;
+  - logs how often the camera sent data again (resent chunks mean our acknowledgements weren't reaching it),
+    whether it resumed after the re-acknowledgement, and how far the signalling got when no link comes up
+    (auth, join, offers, answer, candidates: counts only, no ids).
 - Fix: with `clip_source: sd_only`, visits whose clip the card didn't deliver got no clip at all (0.4.4-dev.1).
   One wake carries at most 6 clips and the card link often drops partway through, so on a busy day most visits
   were left with nothing. Each visit now gets its cloud clip straight away as a stand-in, and the card's full
