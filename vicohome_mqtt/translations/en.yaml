@@ -36,8 +36,8 @@ configuration:
     name: Clip source
     description: >-
       Where clips come from. cloud_first: the cloud, falling back to the camera's SD card when the cloud
-      uploaded only part of a clip. sd_only: always from the SD card (the cloud is still used for the
-      bird events and snapshots). cloud_only: the cloud only, never the card.
+      uploaded only part of a clip. sd_only: from the SD card, with the cloud clip as a stand-in until
+      the card's full clip arrives (named birds first). cloud_only: the cloud only, never the card.
   sd_fetch_hours:
     name: SD fetch interval (hours)
     description: >-

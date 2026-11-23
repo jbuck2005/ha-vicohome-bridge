@@ -31,7 +31,7 @@ from clips import PERIOD_SLACK_S, TRUST_AFTER_S, ClipBudget, ClipMaker, mp4_seco
 from tracker import Tracker
 from vicohome import AuthError, Device, Event, VicohomeClient, VicohomeError
 
-VERSION = "0.4.3"
+VERSION = "0.4.4-dev.1"
 LOG = logging.getLogger("vicohome")
 OPTIONS_FILE = "/data/options.json"
 STATE_FILE = "/data/state.json"
@@ -144,6 +144,10 @@ def sd_polling(opts: dict[str, Any]) -> bool:
 def clip_mode(opts: dict[str, Any]) -> str:
     """clip_source, except that visits found on the SD card always take their clip from the card."""
     return "sd_only" if sd_polling(opts) else opts.get("clip_source", "cloud_first")
+
+
+def _named_bird(rec: dict) -> bool:
+    return str(rec.get("bird") or "").strip().lower() not in ("", "unidentified", "unknown")
 
 
 _sd_key: bytes | None = None
@@ -392,6 +396,7 @@ class Bridge:
         changed = set()
         for serial, trace_id, url in self.clips.process():
             self.tracker.set_field(serial, trace_id, "clip_url", url)
+            self.tracker.set_field(serial, trace_id, "clip_src", "cloud")
             changed.add(serial)
         for trace_id, (serial, seconds) in self.clips.saved.items():
             self.tracker.set_field(serial, trace_id, "clip_seconds", seconds)
@@ -483,8 +488,8 @@ class Bridge:
             if int(rec.get("sd_tries") or 0) >= SD_MAX_TRIES or self.clips.busy(trace_id):
                 continue
             if mode == "sd_only":
-                if rec.get("clip_seconds") and self.clips.path_for(trace_id).exists():
-                    continue  # already have this visit's clip from the card
+                if rec.get("clip_src") != "cloud" and self.clips.path_for(trace_id).exists():
+                    continue  # already have this visit's clip from the card (a cloud stand-in is replaced)
             else:  # cloud_first: only what the cloud left incomplete and still short
                 ev = fresh.get(trace_id)
                 if ev is None or ev.received_all_slice:
@@ -512,16 +517,25 @@ class Bridge:
             LOG.warning("SD fetch unavailable (WebRTC deps missing?): %s", err)
             return
         iface = self._lan_ip()
+        by_trace = {r["trace_id"]: r for r in recs}
         for serial, visits in want.items():
+            # Named birds first, then the newest: with more visits than one wake can carry, the ones
+            # worth watching get the card's full clip and the rest keep their cloud clip.
+            visits.sort(key=lambda v: (not _named_bird(by_trace.get(v[0], {})), -v[1]))
             batch = visits[:SD_MAX_PER_CYCLE]
-            for trace_id, _ in batch:
-                self.tracker.set_field(serial, trace_id, "sd_tries", int(
-                    next((r.get("sd_tries") for r in recs if r["trace_id"] == trace_id), 0) or 0) + 1)
             if not self.api.sd_card_present(serial):
                 LOG.info("SD backfill: camera %s has no card; leaving %d clip(s) to the cloud", serial, len(batch))
                 continue
             LOG.info("SD backfill: fetching %d full clip(s) from camera %s's card", len(batch), serial)
-            got = fetch_sd_clips(self.api, serial, batch, iface_ip=iface, log=LOG)
+            info: dict = {}
+            got = fetch_sd_clips(self.api, serial, batch, iface_ip=iface, log=LOG, info=info)
+            if info.get("listed"):
+                # A try only counts once the camera answered the listing: a session that never came up
+                # says nothing about the visits, and must not use up their tries.
+                for trace_id, _ in batch:
+                    if trace_id not in got:
+                        self.tracker.set_field(serial, trace_id, "sd_tries",
+                                               int(by_trace.get(trace_id, {}).get("sd_tries") or 0) + 1)
             if Bridge._save_sd_clips(self, serial, got):
                 self.publish_clip_storage()
 
@@ -544,8 +558,12 @@ class Bridge:
                 tmp.unlink(missing_ok=True)
             if not secs:
                 continue
+            for jobs in (getattr(self.clips, "pending", None), getattr(self.clips, "rechecks", None)):
+                if jobs is not None:
+                    jobs.pop(trace_id, None)   # the card's clip is whole: no cloud job may overwrite it
             self.tracker.set_field(serial, trace_id, "clip_seconds", secs)
             self.tracker.set_field(serial, trace_id, "clip_url", self.clips.url_for(trace_id))
+            self.tracker.set_field(serial, trace_id, "clip_src", "sd")
             LOG.info("SD backfill: %s now %.1f s from the card", trace_id, secs)
             saved += 1
         return saved
@@ -687,7 +705,8 @@ class Bridge:
                 self.tracker.refresh(events)
                 urls = {e.trace_id: e.video_url for e in events}
                 visits = [(r["trace_id"], urls.get(r["trace_id"], ""))
-                          for r in self.tracker.newest(self.budget.cap) if r["timestamp"] >= start]
+                          for r in self.tracker.newest(self.budget.cap)
+                          if r["timestamp"] >= start and r.get("clip_src") != "sd"]   # card clips are whole
                 counts = self.clips.refetch(visits)
                 self.last_refetch = {"time": datetime.fromtimestamp(now, self.tz).isoformat(timespec="seconds"),
                                      "hours": hours, **counts}
@@ -863,13 +882,13 @@ class Bridge:
                          f" ({ev.confidence:.0f}%)" if ev.confidence else "", rec["time"])
                 self.handle_image(rec, publish=True)
                 self.publish_live_event(rec)
-                if self.clips and self.clip_mode() != "sd_only":
+                if self.clips:   # with sd_only the cloud clip stands in until the card's full clip replaces it
                     self.clips.queue(ev.serial, ev.trace_id, rec.get("video_url", ""),  # made at the end of the poll
                                      rec.get("period"), rec["timestamp"])
         if bootstrap:
             for serial, rec in newest.items():  # show the newest picture once, no event/motion
                 self.handle_image(rec, publish=True)
-        if self.clips and self.clip_mode() != "sd_only":  # cloud clips for recent visits
+        if self.clips:  # cloud clips for recent visits (stand-ins with sd_only)
             for serial in self.tracker.cameras:
                 for rec in self.tracker.recent(serial, min(RECENT_IN_ATTRIBUTES, self.budget.cap)):
                     if not rec.get("clip_url"):

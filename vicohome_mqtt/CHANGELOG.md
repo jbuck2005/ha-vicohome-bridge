@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+- Fix: with `clip_source: sd_only`, visits whose clip the card didn't deliver got no clip at all (0.4.4-dev.1).
+  One wake carries at most 6 clips and the card link often drops partway through, so on a busy day most visits
+  were left with nothing. Each visit now gets its cloud clip straight away as a stand-in, and the card's full
+  clip replaces it when it arrives.
+- SD backfill fetches named birds first, then the newest visits, so the visits worth watching get the card's clip.
+- A wake where the link never came up no longer uses up the visits' SD tries; a try only counts once the camera
+  answered the card listing. A card clip is never overwritten by a later cloud job or a re-fetch.
+
 ## 0.4.3
 - A PEER_OUT no longer ends the SD session at all (0.4.3-dev.21). On real hardware dev.20 still ended a
   session on one that named the camera, 4 s before the link came up, and the link then came up fine; the

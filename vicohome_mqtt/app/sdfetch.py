@@ -941,7 +941,7 @@ def assign_segments(seg: list[dict], visits: list[tuple]) -> tuple[dict[str, lis
     return {name: [trace] for name, (trace, _) in best.items()}, matched - len(best)
 
 
-async def _run(api, serial: str, visits: list[tuple], iface_ip, per_clip_s, log) -> dict:
+async def _run(api, serial: str, visits: list[tuple], iface_ip, per_clip_s, log, info: dict | None = None) -> dict:
     """Fetch the visits' recordings. A recording whose request the camera never acknowledges blocks
     the whole data channel, so the session is closed and the rest are fetched in a fresh one, with the
     stuck recording tried last there by its next path (videoUrl, then one built from the name)."""
@@ -959,6 +959,8 @@ async def _run(api, serial: str, visits: list[tuple], iface_ip, per_clip_s, log)
                 hi = max(v[1] for v in visits) + 60
                 seg = await t.list_segments(lo, hi)
                 log.info("sdfetch: camera lists %d SD segments for the window", len(seg))
+                if info is not None:
+                    info["listed"] = True
                 want, shared = assign_segments(seg, visits)
                 if shared:
                     log.info("sdfetch: %d visit(s) share a recording with a closer visit; they keep their cloud clip",
@@ -1033,16 +1035,17 @@ def poll_sd_recordings(api, serial: str, start: float, stop: float, known=lambda
 
 
 def fetch_sd_clips(api, serial: str, visits: list[tuple], iface_ip: str | None = None,
-                   per_clip_s: float = 90, log: logging.Logger = LOG) -> dict:
+                   per_clip_s: float = 90, log: logging.Logger = LOG, info: dict | None = None) -> dict:
     """Pull the full SD recording for each (trace_id, unix_ts) visit. Returns {trace_id: mp4 bytes}.
 
     One WebRTC session for the batch. Safe to call from a worker thread. Never raises: logs and
-    returns what it got (possibly empty) so the cloud path is never disturbed.
+    returns what it got (possibly empty) so the cloud path is never disturbed. If given, ``info["listed"]``
+    is set once the camera answered the card listing.
     """
     if not visits:
         return {}
     try:
-        return asyncio.run(_run(api, serial, list(visits), iface_ip, per_clip_s, log))
+        return asyncio.run(_run(api, serial, list(visits), iface_ip, per_clip_s, log, info))
     except Exception as err:
         log.warning("sdfetch: session failed: %s", str(err) or err.__class__.__name__)
         return {}
