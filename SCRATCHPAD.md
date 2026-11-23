@@ -5,6 +5,18 @@ between sessions. It is never merged into `main` or `edge`.
 
 ---
 
+## 2026-11-23: Failure to disclose: SD clips shipped in 0.4.3 without proof they worked
+
+This is a failure I want on record. 0.4.3 was released as "SD clips via WebRTC work through NAT with no host
+networking", but that was only shown on a few test fetches. It was never proven on a normal day of visits.
+In real use the card link stalls part-way and the camera drops out of the session. With `sd_only`, that left
+most visits with no clip at all. The release notes didn't say any of this: the limits weren't disclosed.
+
+From now on, a feature only counts as working once it has run on my edge system under normal use, and
+release notes have to say plainly what is proven, what isn't, and what happens when it fails.
+
+---
+
 ## 2026-11-23: Fix missing visit clips (sd_only)
 
 Today the camera logged ~80 visits and none of the confirmed birds got a clip; yesterday only 2 of 24 did.
