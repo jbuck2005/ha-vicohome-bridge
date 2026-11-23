@@ -31,7 +31,7 @@ from clips import PERIOD_SLACK_S, TRUST_AFTER_S, ClipBudget, ClipMaker, mp4_seco
 from tracker import Tracker
 from vicohome import AuthError, Device, Event, VicohomeClient, VicohomeError
 
-VERSION = "0.4.4-dev.2"
+VERSION = "0.4.4-dev.3"
 LOG = logging.getLogger("vicohome")
 OPTIONS_FILE = "/data/options.json"
 STATE_FILE = "/data/state.json"
@@ -93,7 +93,7 @@ def load_options() -> dict[str, Any]:
         "save_images": True, "media_folder": "vicohome", "retention_days": 30,
         "motion_seconds": 60, "log_level": "info",
         "save_clips": True, "clips_to_keep": 60, "clips_max": 600, "clip_folder": "vicohome",
-        "clip_source": "cloud_first", "sd_fetch_hours": 1, "sd_rx_window_kb": 1024, "sd_nat_candidate": True, "sd_send_audio": True,
+        "clip_source": "cloud_first", "sd_fetch_hours": 1, "sd_rx_window_kb": 1024, "sd_nat_candidate": True, "sd_send_audio": True, "sd_delayed_ack": True,
         "visit_source": "cloud", "sd_poll_minutes": SD_POLL_MINUTES_DEFAULT,
         "mqtt_host": "", "mqtt_port": 1883, "mqtt_username": "", "mqtt_password": "",
     }
@@ -1084,7 +1084,7 @@ class Bridge:
 
 
 def sd_tuning(opts: dict) -> None:
-    """Pass the SD link settings to sdfetch (sd_rx_window_kb, sd_nat_candidate, sd_send_audio)."""
+    """Pass the SD link settings to sdfetch (sd_rx_window_kb, sd_nat_candidate, sd_send_audio, sd_delayed_ack)."""
     import sdfetch
     try:
         sdfetch.RX_WINDOW_KB[0] = max(64, min(4096, int(opts.get("sd_rx_window_kb") or 1024)))
@@ -1092,6 +1092,7 @@ def sd_tuning(opts: dict) -> None:
         sdfetch.RX_WINDOW_KB[0] = 1024
     sdfetch.NAT_CANDIDATE[0] = bool(opts.get("sd_nat_candidate", True))
     sdfetch.SEND_AUDIO[0] = bool(opts.get("sd_send_audio", True))
+    sdfetch.SACK_EVERY[0] = 2 if opts.get("sd_delayed_ack", True) else 1
 
 
 def main() -> None:

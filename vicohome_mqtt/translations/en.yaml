@@ -61,6 +61,11 @@ configuration:
     description: >-
       On (default): the SD card link sends the camera a silent audio stream (about 50 packets a second),
       as the bridge always has. Off: it offers two-way audio like the phone app but sends nothing.
+  sd_delayed_ack:
+    name: SD link delayed acknowledgements
+    description: >-
+      On (default): while a clip comes off the card, the bridge acknowledges every second packet (or after
+      200 ms), like the phone app, which halves what it sends the camera. Off: one acknowledgement per packet.
       Troubleshooting only.
   visit_source:
     name: Visit source
