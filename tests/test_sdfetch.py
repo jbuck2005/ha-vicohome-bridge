@@ -364,3 +364,56 @@ def test_peer_out_fields_name_keys_not_values():
     assert f({"method": "PEER_OUT", "senderClientId": "CAM1", "name": "phone"}, "CAM1") == \
         (["name", "senderClientId"], ["senderClientId"])
     assert f({"method": "PEER_OUT"}, "CAM1") == ([], [])
+
+def test_a_stalled_clip_gets_a_fresh_acknowledgement_before_a_new_request(monkeypatch):
+    import asyncio
+
+    class Sctp:
+        _sent_queue = []
+        sent = 0
+
+        async def _send_sack(self):
+            Sctp.sent += 1
+
+    class Pc:
+        sctp = Sctp()
+        iceConnectionState = "completed"
+
+    sdfetch.net_reset()
+    t = tunnel()
+    t.pc = Pc()
+    t.rx = [frame(0x12, 3, 0, b'{"contentLength":10}'), frame(0x16, 3, 1, b"abc")]
+    monkeypatch.setattr(sdfetch, "NUDGE_AFTER_S", 0.2)
+    d = asyncio.run(t._wait(3, 0.8, label="x.mp4", stall_s=5))
+    assert bytes(d["body"]) == b"abc" and Sctp.sent == 1   # one nudge per stall, not one per poll
+
+
+def test_a_camera_that_goes_silent_ends_the_session(monkeypatch):
+    import asyncio
+    import time as _t
+
+    class Pc:
+        sctp = None
+        iceConnectionState = "completed"
+
+    sdfetch.net_reset()
+    sdfetch.NET["last_in"] = _t.time() - 30
+    t = tunnel()
+    t.pc = Pc()
+    assert asyncio.run(t._wait(3, 10, label="x.mp4")) is None
+    assert t.stalled is True
+
+
+def test_resent_chunks_are_counted_for_the_whole_session():
+    sdfetch.net_reset()
+    s = type("S", (), {})()
+    s._last_received_tsn, s._sack_misordered, s._sack_duplicates = 10, set(), []
+    assert sdfetch.RTCSctpTransport._mark_received(s, 10) is True     # already had it
+    assert sdfetch.RTCSctpTransport._mark_received(s, 11) is False
+    assert sdfetch.NET["rtx"] == 1 and "resent to us 1" in sdfetch.net_stats(type("P", (), {"sctp": s})())
+
+
+def test_signalling_stage_text_has_counts_not_ids():
+    text = sdfetch.stage_text({"auth": "ok", "join": "ok", "peer_in": 1, "offers": 2, "answer": False,
+                               "candidates": 0, "peer_out": 1})
+    assert text == "auth ok, join ok, peer-in 1, offers 2, no answer, 0 candidate(s), peer-out 1"

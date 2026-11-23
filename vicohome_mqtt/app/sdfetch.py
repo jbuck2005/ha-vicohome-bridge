@@ -270,6 +270,21 @@ async def _sctp_sack_count(self):
 
 RTCSctpTransport._send_sack = _sctp_sack_count
 
+# Data chunks the camera sent again (a TSN we already had). aiortc forgets them after each SACK, so they
+# are counted here for the whole session: retransmissions during a stall mean our acknowledgements are not
+# reaching the camera; none mean the camera simply stopped sending.
+_sctp_mark = RTCSctpTransport._mark_received
+
+
+def _sctp_mark_count(self, tsn):
+    dup = _sctp_mark(self, tsn)
+    if dup and NET:
+        NET["rtx"] = NET.get("rtx", 0) + 1
+    return dup
+
+
+RTCSctpTransport._mark_received = _sctp_mark_count
+
 # Optional SCTP receive window (sd_rx_window_kb): how much the camera may send before it waits
 # for our acknowledgements. aiortc's default is 1 MB; a smaller window means smaller bursts.
 RX_WINDOW_KB = [0]
@@ -320,7 +335,8 @@ def net_stats(pc) -> str:
     if sctp is not None:
         sc = (f"rx tsn {getattr(sctp, '_last_received_tsn', None)} gaps {len(getattr(sctp, '_sack_misordered', ()))} "
               f"dups {len(getattr(sctp, '_sack_duplicates', ()))} rwnd {getattr(sctp, '_advertised_rwnd', 0) // 1024}k "
-              f"unacked {len(getattr(sctp, '_sent_queue', ()))} sacks {NET['sacks']} (last {ago(NET['last_sack'])})")
+              f"unacked {len(getattr(sctp, '_sent_queue', ()))} resent to us {NET.get('rtx', 0)} "
+              f"sacks {NET['sacks']} (last {ago(NET['last_sack'])})")
     return (f"in {NET['in']} pkts {NET['in_b'] // 1024} kB (last {ago(NET['last_in'])}, {len(NET['srcs'])} "
             f"source(s)); out {NET['out']} pkts {NET['out_b'] // 1024} kB (last {ago(NET['last_out'])}, send errors "
             f"{NET['send_err']}); our checks {NET.get('out_req', 0)} sent, {NET.get('in_resp', 0)} answered (last answer "
@@ -339,6 +355,19 @@ def _deaf() -> bool:
     unanswered = NET.get("out_req", 0) - NET.get("in_resp", 0)
     last_resp, last_req = NET.get("last_in_resp", 0), NET.get("last_in_req", 0)
     return unanswered >= 2 and bool(last_resp) and now - last_resp >= 6 and bool(last_req) and now - last_req < 3
+
+
+def stage_text(stage: dict) -> str:
+    """How far the signalling got: e.g. "auth ok, join ok, peer-in 1, offers 1, no answer, 0 candidates"."""
+    return (f"auth {stage.get('auth', '-')}, join {stage.get('join', '-')}, peer-in {stage.get('peer_in', 0)}, "
+            f"offers {stage.get('offers', 0)}, {'answer' if stage.get('answer') else 'no answer'}, "
+            f"{stage.get('candidates', 0)} candidate(s), peer-out {stage.get('peer_out', 0)}")
+
+
+def _silent_for() -> float:
+    """Seconds since the camera last sent us anything at all (0 before the first datagram)."""
+    last = NET.get("last_in") if NET else 0
+    return time.time() - last if last else 0.0
 
 
 def _peer_out_fields(msg: dict, serial: str) -> tuple:
@@ -405,6 +434,8 @@ STALL_NOTE_S = 3         # note once when no data has arrived for this long
 UNACKED_GIVE_UP_S = 20   # the camera took the link but stopped acknowledging our messages
 RESUME_AFTER_S = 6       # a clip that gets nothing new for this long is asked for again from where it stopped
 RESUMES = 3              # at most this many times per clip
+NUDGE_AFTER_S = 2        # a clip that gets nothing new for this long gets a fresh acknowledgement from us
+SILENT_GIVE_UP_S = 12    # the camera sent nothing at all (no data, checks or RTCP) for this long: it left
 SEND_AUDIO = [True]      # sd_send_audio: send the camera a silent audio stream (off broke the listing in dev.17)
 SESSIONS = 2             # sessions per run: a recording that blocks one gets the rest a fresh session
 
@@ -565,7 +596,7 @@ class _Tunnel:
         next_note = t0 + 10
         next_stats = t0 + STATS_EVERY_S
         last_rx, last_change, stall_noted = self._rx_bytes(), t0, False
-        deaf_noted = False
+        deaf_noted = nudged = False
         while time.time() - t0 < timeout:
             d = self._collected().get(sid)
             if label:
@@ -574,7 +605,9 @@ class _Tunnel:
                     if stall_noted:
                         self.log.info("sdfetch: %s: data again after %.0f s: %s", label, time.time() - last_change,
                                       net_stats(self.pc))
-                    last_rx, last_change, stall_noted = rx, time.time(), False
+                    if nudged:
+                        self.log.info("sdfetch: %s: the camera resumed after our fresh acknowledgement", label)
+                    last_rx, last_change, stall_noted, nudged = rx, time.time(), False, False
                 elif not stall_noted and time.time() - last_change >= STALL_NOTE_S:
                     stall_noted = True
                     self.log.info("sdfetch: %s: nothing new for %d s: %s", label, STALL_NOTE_S, net_stats(self.pc))
@@ -585,6 +618,17 @@ class _Tunnel:
                 return d
             if self.done is not None and self.done.is_set():
                 break   # the camera ended the session or ICE failed; nothing more will arrive
+            if label and d and d["status"] and not nudged and time.time() - last_change >= NUDGE_AFTER_S:
+                # The camera stopped part-way with nothing lost and our window open. Re-acknowledge what we
+                # have (a duplicate SACK is harmless): if our last acknowledgement went missing on the way,
+                # this frees the camera's send window without asking for the file again.
+                nudged = True
+                await self._nudge()
+            if label and _silent_for() >= SILENT_GIVE_UP_S:
+                self.log.warning("sdfetch: %s: the camera has sent nothing at all for %d s; it has left the "
+                                 "session: %s", label, SILENT_GIVE_UP_S, net_stats(self.pc))
+                self.stalled = True
+                break
             if label and not deaf_noted and _deaf():
                 deaf_noted = True
                 self.log.info("sdfetch: %s: the camera stopped answering our checks but still sends its own; our "
@@ -607,6 +651,16 @@ class _Tunnel:
                               self.pc.iceConnectionState if self.pc else "-", self._unacked_for())
             await asyncio.sleep(0.3)
         return self._collected().get(sid)
+
+    async def _nudge(self) -> None:
+        sctp = getattr(self.pc, "sctp", None) if self.pc else None
+        if sctp is None or not hasattr(sctp, "_send_sack"):
+            return
+        try:
+            await sctp._send_sack()
+            NET["nudges"] = NET.get("nudges", 0) + 1
+        except Exception as err:   # the association may be closing; the stall handling carries on
+            self.log.debug("sdfetch: could not re-acknowledge: %s", err)
 
     def _unacked_for(self) -> float:
         """Seconds the oldest data-channel message has waited for the camera's acknowledgement (0 if none)."""
@@ -708,6 +762,10 @@ class _Tunnel:
         self._ws = ws
         pending, offered, answered = [], [False], [False]
         offer_msg: dict = {}
+        # How far the signalling got, for the log when no link comes up (counts and flags only, no ids).
+        stage = {"auth": "-", "join": "-", "peer_in": 0, "offers": 0, "answer": False, "candidates": 0,
+                 "peer_out": 0}
+        self._stage = stage
 
         async def send(obj):
             await ws.send(json.dumps(obj, separators=(",", ":")))
@@ -716,6 +774,7 @@ class _Tunnel:
             method, mtype = msg.get("method"), msg.get("messageType")
             self.log.debug("sdfetch signalling: %s %s", method, mtype or "")
             if method == "AUTH_RESPONSE":
+                stage["auth"] = "ok" if msg.get("code") == 0 else f"code {msg.get('code')}"
                 if msg.get("code") != 0:
                     self.done.set()
                     return
@@ -726,14 +785,19 @@ class _Tunnel:
                             "recipientClientId": self.serial, "supportRtcConnectAcceleration": 1,
                             "accessToken": data["accessToken"]})
             elif method == "JOIN_LIVE_RESPONSE":
+                stage["join"] = "ok" if msg.get("code") == 0 else f"code {msg.get('code')}"
                 if msg.get("code") == 0:
                     await on_message({"method": "PEER_IN"})
             elif method == "PEER_IN" and offered[0] and not answered[0]:
+                stage["peer_in"] += 1
                 if time.time() - offer_msg.get("_t", 0) >= 3:
                     offer_msg["_t"] = time.time()
+                    stage["offers"] += 1
                     await send({k: v for k, v in offer_msg.items() if not k.startswith("_")})
             elif method == "PEER_IN" and not offered[0]:
                 offered[0] = True
+                stage["peer_in"] += 1
+                stage["offers"] += 1
                 await pc.setLocalDescription(await pc.createOffer())
                 comp = compress_offer(pc.localDescription.sdp)
                 offer_msg.update({"method": "TRANSMIT", "messageType": "SDP_OFFER",
@@ -749,6 +813,7 @@ class _Tunnel:
                 if not answer:
                     return
                 answered[0] = True
+                stage["answer"] = True
                 await pc.setRemoteDescription(RTCSessionDescription(sdp=answer, type="answer"))
                 for c in pending:
                     await pc.addIceCandidate(c)
@@ -770,6 +835,7 @@ class _Tunnel:
                     return
                 cand = candidate_from_sdp(line.split(":", 1)[1] if line.startswith("candidate:") else line)
                 cand.sdpMid, cand.sdpMLineIndex = p.get("sdpMid"), p.get("sdpMLineIndex")
+                stage["candidates"] += 1
                 if pc.remoteDescription:
                     await pc.addIceCandidate(cand)
                 else:
@@ -779,6 +845,7 @@ class _Tunnel:
                 # app our session signs out) leaves, and it can name the camera even then. Ending on it
                 # stopped the wait for video and every request at once (0.4.3-dev.16 to dev.20). The link
                 # decides instead: the data channel closing, ICE failing, or the stall timeouts.
+                stage["peer_out"] += 1
                 fields, camera = _peer_out_fields(msg, self.serial)
                 self.log.info("sdfetch: PEER_OUT %s the link (fields: %s; the camera's serial in: %s); carrying on",
                               "after" if dc_open.done() else "before", ", ".join(fields) or "-",
@@ -801,7 +868,8 @@ class _Tunnel:
             await asyncio.wait_for(dc_open, timeout)
         except asyncio.TimeoutError:
             # Name the stage, so a link that can't reach the camera isn't logged as a bare timeout.
-            raise RuntimeError(f"no link to the camera after {timeout:.0f} s (ICE {pc.iceConnectionState})") from None
+            raise RuntimeError(f"no link to the camera after {timeout:.0f} s (ICE {pc.iceConnectionState}; "
+                               f"{stage_text(stage)})") from None
         self.log.info("sdfetch: link up (%s); rcvbuf %d kB, rx window %d kB", _pair_kind(pc), NET.get("rcvbuf", 0) // 1024,
                       (getattr(pc.sctp, "_advertised_rwnd", 0) if pc.sctp else 0) // 1024)
         mapped = NET.get("mapped")
