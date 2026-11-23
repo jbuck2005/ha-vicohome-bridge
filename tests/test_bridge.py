@@ -58,10 +58,10 @@ def test_sd_only_fetches_every_visit_and_respects_the_interval(monkeypatch):
             {"serial": "cam", "trace_id": "v2", "timestamp": now - 3600}]
     b = _fake_bridge("sd_only", 6)
     bridge.Bridge.sd_backfill(b, now, recs, {})
-    assert calls == [("cam", ["v1", "v2"])]            # the card is the source for every visit
+    assert calls == [("cam", ["v2", "v1"])]            # every visit, newest first
     assert b._next_sd_fetch == now + 6 * 3600          # window advanced by sd_fetch_hours
     bridge.Bridge.sd_backfill(b, now + 60, recs, {})   # before the window reopens: no second wake
-    assert calls == [("cam", ["v1", "v2"])]
+    assert calls == [("cam", ["v2", "v1"])]
 
 
 def test_cloud_only_never_wakes_the_camera(monkeypatch):
@@ -119,3 +119,43 @@ def test_sd_test_never_wakes_a_cloud_only_camera(monkeypatch):
     b.lock = threading.Lock()
     b.tracker = types.SimpleNamespace(newest=lambda n: [{"serial": "cam", "trace_id": "v1", "timestamp": 0}])
     assert bridge.Bridge.sd_test(b, 2) is None and calls == []
+
+
+def test_sd_only_tries_birds_first_and_replaces_cloud_stand_ins(monkeypatch, tmp_path):
+    calls, kws = [], []
+    monkeypatch.setattr(sdfetch, "fetch_sd_clips",
+                        lambda api, serial, visits, **kw: (calls.append([t for t, _ in visits]), kws.append(kw), {})[2])
+    now = 1_000_000.0
+    have = tmp_path / "stand_in.mp4"
+    have.write_bytes(b"x")
+    card = tmp_path / "card.mp4"
+    card.write_bytes(b"x")
+    recs = [{"serial": "cam", "trace_id": f"u{i}", "timestamp": now - 600 - i, "bird": "Unidentified"}
+            for i in range(8)]
+    recs += [{"serial": "cam", "trace_id": "jay", "timestamp": now - 9000, "bird": "Blue Jay"},
+             {"serial": "cam", "trace_id": "stand_in", "timestamp": now - 700, "bird": "Unidentified",
+              "clip_src": "cloud", "clip_seconds": 8},
+             {"serial": "cam", "trace_id": "card", "timestamp": now - 650, "bird": "Cardinal",
+              "clip_src": "sd", "clip_seconds": 30}]
+    b = _fake_bridge("sd_only", 1)
+    b.clips.path_for = lambda t: tmp_path / (t + ".mp4")
+    bridge.Bridge.sd_backfill(b, now, recs, {})
+    batch = calls[0]
+    assert batch[0] == "jay"                  # a named bird goes first, however old
+    assert "card" not in batch                # the card's clip is already whole
+    assert len(batch) == bridge.SD_MAX_PER_CYCLE
+    assert "info" in kws[0]
+
+
+def test_sd_tries_only_count_when_the_camera_listed_its_card(monkeypatch):
+    seen = {}
+    b = _fake_bridge("sd_only", 1)
+    b.tracker = types.SimpleNamespace(set_field=lambda s, t, k, v: seen.__setitem__((t, k), v))
+    recs = [{"serial": "cam", "trace_id": "v1", "timestamp": 0}]
+    monkeypatch.setattr(sdfetch, "fetch_sd_clips", lambda *a, **kw: {})   # no link: never listed
+    bridge.Bridge.sd_backfill(b, 1000.0, recs, {})
+    assert ("v1", "sd_tries") not in seen
+    monkeypatch.setattr(sdfetch, "fetch_sd_clips", lambda *a, info, **kw: (info.update(listed=True), {})[1])
+    b._next_sd_fetch = 0.0
+    bridge.Bridge.sd_backfill(b, 1000.0, recs, {})
+    assert seen[("v1", "sd_tries")] == 1

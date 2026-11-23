@@ -36,7 +36,7 @@ over MQTT (with discovery). Needs the Mosquitto broker add-on and the MQTT integ
 | `retention_days` | 30 | Delete saved snapshots older than this (0 = keep forever). |
 | `motion_seconds` | 60 | How long the motion sensor stays on. |
 | `save_clips` | true | Turn each visit's clip into an MP4 in `/config/www/<clip_folder>/`, linked as `clip_url` (`/local/...`). |
-| `clip_source` | cloud_first | `cloud_first`: cloud, falling back to the SD card when a cloud clip is incomplete. `sd_only`: always from the SD card (the cloud is still used for events and snapshots). `cloud_only`: never use the card. |
+| `clip_source` | cloud_first | `cloud_first`: cloud, falling back to the SD card when a cloud clip is incomplete. `sd_only`: from the SD card, with the cloud clip as a stand-in until the card's clip arrives. `cloud_only`: never use the card. |
 | `sd_fetch_hours` | 1 | How often the camera may be woken to pull SD clips (1-24 h). Higher = fewer wakes, longer battery life, later SD clips. No effect with `cloud_only`. |
 | `sd_rx_window_kb` | 1024 | Troubleshooting (64-4096). How much of an SD clip the camera may send before it waits for the bridge's acknowledgements (default 1024 kB). A smaller value, such as 128, sends the clip in smaller bursts. |
 | `sd_nat_candidate` | on | Troubleshooting. Without host networking, offer the camera the LAN address it saw us at last time (learnt automatically and kept in the add-on's `/data`), instead of the add-on network's private address. |
@@ -90,9 +90,10 @@ network (the same path the app uses). `clip_source` chooses how it is used:
 
 - **`cloud_first`** (default): clips come from the cloud; when the cloud marks a visit incomplete and the camera
   has a card, the bridge pulls the full recording from the card and replaces the short clip.
-- **`sd_only`**: clips always come from the card. The cloud is still polled for the bird events and snapshots,
-  but the clip video is taken from the card. A clip appears after the next SD fetch window rather than right
-  away. If the camera has no card, no clips are saved (use `cloud_first` instead).
+- **`sd_only`**: every visit's clip is taken from the card. The cloud clip is saved straight away as a stand-in,
+  and the card's full recording replaces it after the next SD fetch window. Named birds are fetched first, then
+  the newest visits (at most 6 per wake), so on a busy day some visits keep their cloud clip. If the camera has
+  no card, or the card link fails, the visit keeps its cloud clip.
 - **`cloud_only`**: the card is never touched.
 
 **Battery note.** Every SD fetch *wakes the camera* (and briefly signs the phone app out — a camera serves one
