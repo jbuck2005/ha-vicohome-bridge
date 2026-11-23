@@ -5,6 +5,25 @@ between sessions. It is never merged into `main` or `edge`.
 
 ---
 
+## 2026-11-23: Fix missing visit clips (sd_only)
+
+Today the camera logged ~80 visits and none of the confirmed birds got a clip; yesterday only 2 of 24 did.
+Edge had nothing new since 0.4.3, so this wasn't a new commit. The cause: I run `clip_source: sd_only`, and in
+that mode a visit only ever got a clip from the card. One wake carries at most 6 clips an hour, the card link
+keeps dropping partway through a batch (stall, then the next session never gets past ICE "new"), and every
+wake used up the batch's two SD tries even when the link never came up. So most visits ended with nothing.
+
+Fix in PR #50 (0.4.4-dev.1, into edge): sd_only now saves the cloud clip straight away as a stand-in and the
+card's full clip replaces it when it arrives; the backfill takes named birds first, then the newest; a try
+only counts once the camera answered the card listing; a card clip is never overwritten by a cloud job or a
+re-fetch.
+
+Status: PR open, merging when CI is green. Next: update the edge add-on and check that new visits get clips.
+Still open: the card link stalling through Docker's NAT since host networking was dropped in 0.4.3. That's a
+separate call because it touches the security rating.
+
+---
+
 ## 2026-11-21: Planned the local cloud-replacement server
 
 Mapped out what it'd take to replace the Vicohome cloud for a re-provisioned camera. Going through the app's
