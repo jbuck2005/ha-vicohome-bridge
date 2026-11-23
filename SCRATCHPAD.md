@@ -5,6 +5,19 @@ between sessions. It is never merged into `main` or `edge`.
 
 ---
 
+## 2026-11-23: SD link holds without host networking (0.4.4-dev.3), first run
+
+dev.2's new counters showed the real failure: about 4 MB in, the camera kept resending data we'd already
+acknowledged and stopped answering our checks, so our packets stopped reaching it, then it left and refused new
+sessions. aiortc was acknowledging every packet (~300/s). #52 acknowledges every second packet or after 200 ms,
+like the phone app (option `sd_delayed_ack`, on). First run on my edge system: all 6 clips in one session,
+~18.5 MB in ~57 s, no stalls, nothing resent, every check answered, full 19-20 s clips.
+
+Status: one good run. Not proven yet. Next: check the next hourly backfill(s) before calling it fixed. Cloud
+stand-in clips (#50) are confirmed working.
+
+---
+
 ## 2026-11-23: Failure to disclose: SD clips shipped in 0.4.3 without proof they worked
 
 This is a failure I want on record. 0.4.3 was released as "SD clips via WebRTC work through NAT with no host
