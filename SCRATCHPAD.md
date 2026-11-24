@@ -5,6 +5,19 @@ between sessions. It is never merged into `main` or `edge`.
 
 ---
 
+## 2026-11-24: dev.3 real-use check (afternoon window)
+
+The log on my edge system only reached back to 14:34. From 14:34 to 16:17: 30 visits, and all 30 got a cloud clip
+straight away (none left without one). Card runs: 15:34 got 6 of 6 full clips, no stalls; 14:34 got nothing
+because the camera never answered the card listing (a different failure from the old 4 MB stall). Since dev.3,
+that's 5 of 6 card runs clean. All 150 kept clips are from today (since 08:09), so `clips_to_keep` 150 is too low for
+a full day here.
+
+Status: cloud stand-ins proven; card link much better but not proven for release. Next: look at the listing
+timeout and the repeated card fetch of one visit.
+
+---
+
 ## 2026-11-23: SD link holds without host networking (0.4.4-dev.3), first run
 
 dev.2's new counters showed the real failure: about 4 MB in, the camera kept resending data we'd already
