@@ -13,8 +13,9 @@ sessions. aiortc was acknowledging every packet (~300/s). #52 acknowledges every
 like the phone app (option `sd_delayed_ack`, on). First run on my edge system: all 6 clips in one session,
 ~18.5 MB in ~57 s, no stalls, nothing resent, every check answered, full 19-20 s clips.
 
-Status: one good run. Not proven yet. Next: check the next hourly backfill(s) before calling it fixed. Cloud
-stand-in clips (#50) are confirmed working.
+Status: second full backfill at 18:21 also 6 of 6 (~20.6 MB, nothing resent, every check answered), plus two
+2-clip button tests clean. Next: let it run a full day of normal visits on edge before it goes in a release.
+Cloud stand-in clips (#50) are confirmed working.
 
 ---
 
