@@ -5,6 +5,13 @@ between sessions. It is never merged into `main` or `edge`.
 
 ---
 
+## 2026-11-24 evening: day check of edge 0.4.4-dev.3
+
+- The log only kept 16:35 to 17:37. Two hourly card runs in it (16:35 and 17:35): 6 of 6 each, clean close, no stalls, no resends, no warnings. One new visit got its cloud clip at once and its card clip at the next run.
+- Today the card got everything in 3 of 4 hourly runs. The 14:34 run failed because the camera never answered the listing. Since dev.3 went on last night: 6 of 7 runs clean.
+- The visit fetched from the card twice last night isn't a bug. Both of those runs were the Test SD fetch button, and the button fetches the newest visits even when they already have a card clip. The hourly backfill skips them.
+- Still not proven for release: one bad run in seven, and the 14:34 listing timeout isn't explained yet. I want another day of normal use first.
+
 ## 2026-11-24: dev.3 real-use check (afternoon window)
 
 The log on my edge system only reached back to 14:34. From 14:34 to 16:17: 30 visits, and all 30 got a cloud clip
