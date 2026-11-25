@@ -5,6 +5,12 @@ between sessions. It is never merged into `main` or `edge`.
 
 ---
 
+## 2026-11-25: plan and PR #53 for the two leftovers (0.4.4-dev.4)
+
+- Card listing never answered (the 14:34 run on 11-24): the link came up, but the camera sent no video and answered nothing. The run gave up, so the visits waited an hour. Now an unanswered listing gets one fresh session at once. It doesn't use the session kept for a blocked clip, and the log shows whether a frame came and how long the camera had been silent. An empty listing isn't retried.
+- Busy days lost their morning clips: 150+ visits against a limit of 150 that only grows at midnight. Clips from the last 24 hours are now kept past the limit, up to clips_max, with more than 2 GB free. One full day now grows the limit (it used to take two in a row).
+- 122 tests pass, and so does the end-to-end check. Neither change is proven on the camera yet; both need a day of normal use.
+
 ## 2026-11-24 evening: day check of edge 0.4.4-dev.3
 
 - The log only kept 16:35 to 17:37. Two hourly card runs in it (16:35 and 17:35): 6 of 6 each, clean close, no stalls, no resends, no warnings. One new visit got its cloud clip at once and its card clip at the next run.
