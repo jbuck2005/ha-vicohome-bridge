@@ -350,11 +350,11 @@ class ClipBudget:
     """Self-sizing clip limit, audited once per (complete) day.
 
     A day "fills the space" when that day's visits alone reach the limit, i.e. the limit could not
-    hold even one day of clips. Two such days in a row grow the limit; seven days in a row using at
+    hold even one day of clips. One such day grows the limit; seven days in a row using at
     most half of it shrink it (never below the minimum).
     """
 
-    GROW_AFTER_DAYS = 2
+    GROW_AFTER_DAYS = 1   # one day that couldn't fit is enough: the next busy day shouldn't lose clips too
     SHRINK_AFTER_DAYS = 7
     MIN_FREE_BYTES_TO_GROW = 2 * 1024 ** 3
     KEEP_AUDITS = 30

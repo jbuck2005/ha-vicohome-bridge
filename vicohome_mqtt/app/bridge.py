@@ -31,7 +31,7 @@ from clips import PERIOD_SLACK_S, TRUST_AFTER_S, ClipBudget, ClipMaker, mp4_seco
 from tracker import Tracker
 from vicohome import AuthError, Device, Event, VicohomeClient, VicohomeError
 
-VERSION = "0.4.4-dev.3"
+VERSION = "0.4.4-dev.4"
 LOG = logging.getLogger("vicohome")
 OPTIONS_FILE = "/data/options.json"
 STATE_FILE = "/data/state.json"
@@ -41,6 +41,7 @@ RECENT_IN_ATTRIBUTES = 10
 # Clip repair: how often the kept visits of the last REPAIR_WINDOW_S are checked against the cloud,
 # how soon after a start, and how many times one clip is made again before it is left alone.
 REPAIR_EVERY_S = 3600
+KEEP_RECENT_S = 24 * 3600   # clips this young are kept past the limit on a busy day (up to clips_max)
 REPAIR_FIRST_AFTER_S = 120
 REPAIR_WINDOW_S = 48 * 3600
 MAX_REPAIRS = 3
@@ -390,6 +391,26 @@ class Bridge:
         sub = slug(self.opts["clip_folder"])
         return ClipMaker(root / "www" / sub, f"/local/{sub}", self.api.fetch_text)
 
+    def clip_keep(self, now: float | None = None) -> int:
+        """How many of the newest clips to keep: the limit, or every visit of the last 24 hours if more.
+
+        A busy day can have more visits than the limit (it only grows at the next midnight audit), and
+        pruning by count alone would delete that morning's clips. Recent clips are kept up to clips_max,
+        and only while the disk has room.
+        """
+        cap = self.budget.cap
+        now = time.time() if now is None else now
+        recent = sum(1 for r in self.tracker.newest(self.budget.maximum) if r["timestamp"] >= now - KEEP_RECENT_S)
+        if recent <= cap:
+            return cap
+        try:
+            free = shutil.disk_usage(self.clips.folder.parent).free
+        except (OSError, AttributeError):
+            free = None
+        if free is not None and free < ClipBudget.MIN_FREE_BYTES_TO_GROW:
+            return cap
+        return min(self.budget.maximum, recent)
+
     def handle_clips(self) -> None:
         if not self.clips:
             return
@@ -402,10 +423,12 @@ class Bridge:
             self.tracker.set_field(serial, trace_id, "clip_seconds", seconds)
             changed.add(serial)
         self.clips.saved.clear()
-        keep = [r["trace_id"] for r in self.tracker.newest(self.budget.cap)]
+        keep_n = self.clip_keep()
+        keep = [r["trace_id"] for r in self.tracker.newest(keep_n)]
         removed = self.clips.prune(keep)
         if removed:
-            LOG.info("Removed %d old clip(s) to keep the newest %d", removed, len(keep))
+            LOG.info("Removed %d old clip(s) to keep the newest %d%s", removed, len(keep),
+                     f" (the last 24 hours; limit {self.budget.cap})" if keep_n > self.budget.cap else "")
             keep_set = set(keep)
             for cam in self.tracker.cameras.values():
                 for rec in cam.get("history", []):
@@ -430,7 +453,7 @@ class Bridge:
         if not self.clips or now < self._next_repair:
             return
         self._next_repair = now + REPAIR_EVERY_S
-        recs = [r for r in self.tracker.newest(self.budget.cap)
+        recs = [r for r in self.tracker.newest(self.clip_keep(now))
                 if now - REPAIR_WINDOW_S <= r["timestamp"] <= now - TRUST_AFTER_S
                 and int(r.get("clip_repairs") or 0) < MAX_REPAIRS and not self.clips.busy(r["trace_id"])]
         if not recs:
@@ -705,7 +728,7 @@ class Bridge:
                 self.tracker.refresh(events)
                 urls = {e.trace_id: e.video_url for e in events}
                 visits = [(r["trace_id"], urls.get(r["trace_id"], ""))
-                          for r in self.tracker.newest(self.budget.cap)
+                          for r in self.tracker.newest(self.clip_keep(now))
                           if r["timestamp"] >= start and r.get("clip_src") != "sd"]   # card clips are whole
                 counts = self.clips.refetch(visits)
                 self.last_refetch = {"time": datetime.fromtimestamp(now, self.tz).isoformat(timespec="seconds"),
@@ -729,7 +752,7 @@ class Bridge:
             free = None
         st = self.budget.state
         self.pub(f"{self.base}/clips", {
-            "size_mb": round(size / 1024 ** 2, 1), "count": len(files), "limit": self.budget.cap,
+            "size_mb": round(size / 1024 ** 2, 1), "count": len(files), "limit": self.budget.cap, "keeping": self.clip_keep(),
             "minimum": self.budget.minimum, "maximum": self.budget.maximum,
             "full_streak": st.get("full_streak", 0), "light_streak": st.get("light_streak", 0),
             "today_visits": self.tracker.daily.get(self.tracker.day_of(time.time()), 0),

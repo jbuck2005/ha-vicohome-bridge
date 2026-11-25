@@ -473,6 +473,7 @@ NUDGE_AFTER_S = 2        # a clip that gets nothing new for this long gets a fre
 SILENT_GIVE_UP_S = 12    # the camera sent nothing at all (no data, checks or RTCP) for this long: it left
 SEND_AUDIO = [True]      # sd_send_audio: send the camera a silent audio stream (off broke the listing in dev.17)
 SESSIONS = 2             # sessions per run: a recording that blocks one gets the rest a fresh session
+LIST_RETRIES = 1         # extra sessions per run when the camera never answers the card listing
 
 
 def _clip_paths(item: dict, name: str, serial: str) -> list[tuple[str, str]]:
@@ -942,7 +943,8 @@ class _Tunnel:
         self._send_http("POST", "/dc/rtcconnection/open", body=json.dumps({"deviceSdpMode": 0, "serialNumber": self.serial}))
         await asyncio.sleep(2)
 
-    async def list_segments(self, start: float, stop: float) -> list[dict]:
+    async def list_segments(self, start: float, stop: float) -> list[dict] | None:
+        """The card's recordings in the window; None when the camera never answered (not an empty card)."""
         body = {"app": {"appType": "Android", "version": 0}, "crossCameraOnly": False, "fromSDCard": True,
                 "storeType": "sd_card", "serialNumber": [self.serial], "startTimestamp": int(start),
                 "endTimestamp": int(stop), "from": 0, "to": 2000, "language": "en", "countryNo": "US"}
@@ -969,7 +971,10 @@ class _Tunnel:
                 pass
         if not out:
             if not d or not d["status"]:
-                self.log.info("sdfetch: the camera didn't answer the card listing in 15 s: %s", net_stats(self.pc))
+                self.log.info("sdfetch: the camera didn't answer the card listing in 15 s (video frame %s, "
+                              "camera silent %.0f s): %s", "seen" if self.first_frame is not None and self.first_frame.done() else "never seen",
+                              _silent_for(), net_stats(self.pc))
+                return None
             else:
                 self.log.info("sdfetch: the card listing came back empty (%d bytes; %s)", len(d["body"]),
                               _shape(d["status"].decode(errors="replace")[:120], self.serial))
@@ -1052,15 +1057,28 @@ async def _run(api, serial: str, visits: list[tuple], iface_ip, per_clip_s, log,
     want: dict | None = None
     alts: dict[str, list] = {}
     stuck: dict[str, int] = {}          # name -> index of the path to try next
-    for session in range(1, SESSIONS + 1):
+    session, sessions, list_retry = 0, SESSIONS, LIST_RETRIES
+    while session < sessions:
+        session += 1
         t = _Tunnel(api, serial, iface_ip, log)
         try:
             await t.connect()
-            await t.prepare(35 if session == 1 else 8)   # a camera already awake needs no long wait
+            await t.prepare(35 if session == 1 or want is None else 8)   # a camera already awake needs no long wait
             if want is None:
                 lo = min(v[1] for v in visits) - 60
                 hi = max(v[1] for v in visits) + 60
                 seg = await t.list_segments(lo, hi)
+                if seg is None:
+                    # The link came up but the camera never answered (seen with no video frame and no
+                    # consent answers either): a dead session. A fresh one usually works, and costs no
+                    # more than the next hourly try would; it doesn't use up the blocked-clip session.
+                    if list_retry <= 0:
+                        log.warning("sdfetch: no answer to the card listing again; giving up for now")
+                        break
+                    list_retry -= 1
+                    sessions += 1
+                    log.warning("sdfetch: no answer to the card listing; trying a fresh session")
+                    continue
                 log.info("sdfetch: camera lists %d SD segments for the window", len(seg))
                 if info is not None:
                     info["listed"] = True
@@ -1107,7 +1125,10 @@ async def _poll(api, serial: str, start: float, stop: float, known, max_fetch: i
     try:
         await t.connect()
         await t.prepare()
-        seg = [s for s in await t.list_segments(start, stop)
+        listed = await t.list_segments(start, stop)
+        if listed is None:
+            raise RuntimeError("the camera didn't answer the card listing")
+        seg = [s for s in listed
                if s.get("timestamp") and (s.get("period") or 0) >= 3 and not known(s)]
         seg.sort(key=lambda s: s["timestamp"], reverse=True)   # newest first: they matter most
         log.info("sdpoll: camera lists %d new SD recording(s) since the last poll", len(seg))

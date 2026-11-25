@@ -204,43 +204,42 @@ def run(budget, visits):
         budget.audit(f"2026-12-{i + 1:02d}", v, free_bytes=50 * 1024 ** 3)
 
 
-def test_budget_starts_at_minimum_and_one_full_day_is_not_enough():
+def test_budget_starts_at_minimum_and_grows_after_one_full_day():
     b = ClipBudget({}, 60, 600)
     assert b.cap == 60
     run(b, [70])
-    assert b.cap == 60 and b.state["full_streak"] == 1
+    assert b.cap == 90  # max(60 + 30, ceil10(70 * 1.25))
+    assert b.state["audits"][-1]["action"] == "grow 60->90"
 
 
-def test_budget_grows_after_two_full_days_in_a_row():
+def test_budget_grows_to_fit_a_busy_day():
     b = ClipBudget({}, 60, 600)
-    run(b, [70, 120])
+    run(b, [120])
     assert b.cap == 150  # max(60 + 30, ceil10(120 * 1.25))
-    assert b.state["audits"][-1]["action"] == "grow 60->150"
-    run(b, [160, 100])  # second day doesn't fill 150 -> no growth
+    run(b, [100])        # a day that fits -> no growth
     assert b.cap == 150
 
 
-def test_budget_full_days_must_be_consecutive():
+def test_budget_does_not_grow_for_a_day_that_fits():
     b = ClipBudget({}, 60, 600)
-    run(b, [70, 30, 70])
+    run(b, [59, 30, 50])
     assert b.cap == 60
 
 
 def test_budget_keeps_growing_until_days_fit():
     b = ClipBudget({}, 60, 600)
-    run(b, [200, 200])        # -> 250
-    run(b, [260, 260])        # -> 330
-    run(b, [260, 260, 260])   # fits now
+    run(b, [200])        # -> 250
+    run(b, [260])        # -> 330
+    run(b, [260] * 3)    # fits now
     assert b.cap == 330
 
 
 def test_budget_respects_maximum_and_low_disk():
     b = ClipBudget({}, 60, 100)
-    run(b, [500, 500])
+    run(b, [500])
     assert b.cap == 100
     b2 = ClipBudget({}, 60, 600)
     b2.audit("2026-12-01", 90, free_bytes=1024 ** 3)
-    b2.audit("2026-12-02", 90, free_bytes=1024 ** 3)
     assert b2.cap == 60 and "low disk" in b2.state["audits"][-1]["action"]
 
 

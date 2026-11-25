@@ -332,6 +332,53 @@ def test_a_blocking_recording_gets_the_rest_a_fresh_session(monkeypatch):
     assert gets == [(1, "/dl/bad"), (2, "/dl/good"), (2, "/vid/bad")]
 
 
+def _listing_tunnel(answers, gets, sessions):
+    class FakeTunnel:
+        def __init__(self, *a):
+            self.stalled = False
+            sessions.append(self)
+
+        async def connect(self): pass
+        async def prepare(self, frame_wait=35): self.frame_wait = frame_wait
+        async def close(self): pass
+        async def list_segments(self, lo, hi): return answers[len(sessions) - 1]
+
+        async def fetch(self, name, timeout, path):
+            gets.append((len(sessions), path))
+            return b"mp4:" + name.encode()
+    return FakeTunnel
+
+
+def test_an_unanswered_listing_gets_a_fresh_session(monkeypatch):
+    import asyncio
+    seg = [{"name": "a.mp4", "timestamp": 1000, "period": 20, "path": "/dl/a", "paths": [("downloadUrl", "/dl/a")]}]
+    sessions, gets, info = [], [], {}
+    monkeypatch.setattr(sdfetch, "_Tunnel", _listing_tunnel([None, seg], gets, sessions))
+    out = asyncio.run(sdfetch._run(None, "S", [("va", 1000)], None, 30, logging.getLogger("t"), info))
+    assert out == {"va": b"mp4:a.mp4"}
+    assert len(sessions) == 2 and gets == [(2, "/dl/a")]
+    assert sessions[1].frame_wait == 35          # the fresh session waits for the camera like the first
+    assert info.get("listed") is True
+
+
+def test_a_listing_retry_leaves_the_blocked_clip_session(monkeypatch):
+    import asyncio
+    sessions, gets, info = [], [], {}
+    monkeypatch.setattr(sdfetch, "_Tunnel", _listing_tunnel([None, None, None], gets, sessions))
+    out = asyncio.run(sdfetch._run(None, "S", [("va", 1000)], None, 30, logging.getLogger("t"), info))
+    assert out == {} and gets == []
+    assert len(sessions) == 1 + sdfetch.LIST_RETRIES   # one retry, then the hourly run tries again
+    assert "listed" not in info                        # an unanswered listing uses up no tries
+
+
+def test_an_empty_card_is_not_retried(monkeypatch):
+    import asyncio
+    sessions, gets, info = [], [], {}
+    monkeypatch.setattr(sdfetch, "_Tunnel", _listing_tunnel([[], []], gets, sessions))
+    assert asyncio.run(sdfetch._run(None, "S", [("va", 1000)], None, 30, logging.getLogger("t"), info)) == {}
+    assert len(sessions) == 1 and info.get("listed") is True
+
+
 def test_clip_paths_lists_every_local_form():
     item = {"downloadUrl": "/dc/download/mp4/a.mp4?sn=S", "videoUrl": "https://cloud.example/x.mp4"}
     assert sdfetch._clip_paths(item, "a.mp4", "S") == [("downloadUrl", "/dc/download/mp4/a.mp4?sn=S"),
