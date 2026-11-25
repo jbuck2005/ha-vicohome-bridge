@@ -107,8 +107,10 @@ add-on to the camera's LAN address, so the Home Assistant host must be on the ca
 ### Self-sizing clip limit (daily audit)
 Just after local midnight the bridge audits the previous day (only days it saw completely):
 - A day **fills the space** when its visits alone reach the limit (the limit couldn't hold one day).
-- **2 filled days in a row** -> the limit grows to max(limit + 30, 1.25 x the busier day), rounded up to 10,
+- **A filled day** -> the limit grows to max(limit + 30, 1.25 x that day), rounded up to 10,
   capped at `clips_max`, and only if more than 2 GB is free.
+- Until then, clips from the **last 24 hours are never pruned** on a busy day: they are kept past the limit,
+  up to `clips_max`, while more than 2 GB is free (`keeping` in `sensor.<cam>_clip_storage`).
 - **7 days in a row using at most half** of the limit -> it shrinks to 1.5 x the busiest of those days
   (never below `clips_to_keep`).
 `sensor.<cam>_clip_storage` (MB) carries count, limit, streaks, free space and the last 14 audits;

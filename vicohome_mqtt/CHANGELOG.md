@@ -1,6 +1,16 @@
 # Changelog
 
 ## Unreleased
+- SD link: a fresh session when the camera never answers the card listing (0.4.4-dev.4). In one run the link
+  came up but the camera sent no video and answered nothing; the run gave up and the visits waited an hour.
+  The bridge now opens one more session at once (it doesn't use up the session kept for a blocked clip) and
+  logs whether a video frame came and how long the camera had been silent. Not yet proven on the camera.
+- Clip limit: clips from the last 24 hours are no longer deleted on a busy day (0.4.4-dev.4). The limit only
+  grows at the midnight audit, so a day with more visits than the limit lost its morning's clips. Recent clips
+  are now kept past the limit, up to `clips_max` and only with more than 2 GB free, and one full day (not two
+  in a row) grows the limit. `sensor.<cam>_clip_storage` shows how many are being kept as `keeping`.
+- aioice is pinned to 0.14.0, the version proven on the camera (0.4.4-dev.4). aioice 0.15 came out the same day
+  and changes the internals the SD link patches; a new image build would otherwise have picked it up untested.
 - SD link: delayed acknowledgements (0.4.4-dev.3). In the dev.2 logs the camera kept resending data we had
   already acknowledged and stopped answering our checks about 4 MB into a session, then left: our packets
   stopped getting through to it. aiortc acknowledged every packet (about 300 a second); the bridge now

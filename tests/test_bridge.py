@@ -159,3 +159,22 @@ def test_sd_tries_only_count_when_the_camera_listed_its_card(monkeypatch):
     b._next_sd_fetch = 0.0
     bridge.Bridge.sd_backfill(b, 1000.0, recs, {})
     assert seen[("v1", "sd_tries")] == 1
+
+
+def test_clip_keep_holds_a_busy_days_clips(tmp_path, monkeypatch):
+    from collections import namedtuple
+    now = 1_000_000.0
+    recs = [{"trace_id": f"t{i}", "timestamp": now - i * 300} for i in range(400)]   # 289 in the last 24 h (both ends)
+    b = types.SimpleNamespace(budget=types.SimpleNamespace(cap=150, maximum=600),
+                              tracker=types.SimpleNamespace(newest=lambda n: recs[:n]),
+                              clips=types.SimpleNamespace(folder=tmp_path / "clips"))
+    usage = namedtuple("usage", "total used free")
+    monkeypatch.setattr(bridge.shutil, "disk_usage", lambda p: usage(0, 0, 50 * 1024 ** 3))
+    assert bridge.Bridge.clip_keep(b, now) == 289          # every visit of the last 24 hours
+    b.budget.maximum = 200
+    assert bridge.Bridge.clip_keep(b, now) == 200          # never past clips_max
+    b.budget.maximum = 600
+    monkeypatch.setattr(bridge.shutil, "disk_usage", lambda p: usage(0, 0, 1024 ** 3))
+    assert bridge.Bridge.clip_keep(b, now) == 150          # low disk: the limit holds
+    b.budget.cap = 300
+    assert bridge.Bridge.clip_keep(b, now) == 300          # a quiet day: just the limit
