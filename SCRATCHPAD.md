@@ -5,6 +5,13 @@ between sessions. It is never merged into `main` or `edge`.
 
 ---
 
+## 2026-11-26 morning: first look at dev.4 on the camera
+
+- dev.4 is installed. HA only kept 07:22 to 08:24 of the log.
+- Both card runs got 0 of 6. Each time the first clip stalled part-way (at about 3.1 MB and 2.3 MB), the resume got no answer, the camera went silent for 12 s and closed the channel, and then it never answered the second session's offer. This is the same shape as before the dev.3 ack fix, though dev.3 got 6 of 6 several times. The dev.4 changes weren't involved: there was no unanswered listing, and pruning only ever removed 1 clip at a time because the last 24 hours held fewer than 150 visits.
+- Every visit still got its cloud clip (4 of 4).
+- Not proven. The short HA log buffer keeps hiding most of the day, so I need a way to see card success over a whole day.
+
 ## 2026-11-25: plan and PR #53 for the two leftovers (0.4.4-dev.4)
 
 - Card listing never answered (the 14:34 run on 11-24): the link came up, but the camera sent no video and answered nothing. The run gave up, so the visits waited an hour. Now an unanswered listing gets one fresh session at once. It doesn't use the session kept for a blocked clip, and the log shows whether a frame came and how long the camera had been silent. An empty listing isn't retried.
