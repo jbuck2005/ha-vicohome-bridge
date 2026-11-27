@@ -41,6 +41,7 @@ class Tracker:
         self.daily: dict[str, int] = {}  # local date -> visits
         self.tracked_since: float | None = None  # visits are complete from this time on
         self.clip_budget: dict[str, Any] = {}
+        self.sd_stats: dict[str, Any] = {}  # local date -> SD card run counts (no ids), plus "last"
         self.dirty = False
         self._load()
 
@@ -61,6 +62,7 @@ class Tracker:
         self.daily = {k: int(v) for k, v in (data.get("daily") or {}).items()}
         self.tracked_since = data.get("tracked_since")
         self.clip_budget = data.get("clip_budget") or {}
+        self.sd_stats = data.get("sd_stats") or {}
         if not self.daily:  # state from 0.1/0.2: rebuild the counts from the history
             for cam in self.cameras.values():
                 for rec in cam.get("history", []):
@@ -75,7 +77,7 @@ class Tracker:
             json.dump({"seen": self.seen, "cameras": self.cameras, "last_poll": self.last_poll,
                        "last_sd_poll": self.last_sd_poll,
                        "daily": self.daily, "tracked_since": self.tracked_since,
-                       "clip_budget": self.clip_budget}, fh)
+                       "clip_budget": self.clip_budget, "sd_stats": self.sd_stats}, fh)
         os.replace(tmp, self.path)
         self.dirty = False
 

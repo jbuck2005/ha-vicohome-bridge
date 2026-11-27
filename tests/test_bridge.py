@@ -178,3 +178,33 @@ def test_clip_keep_holds_a_busy_days_clips(tmp_path, monkeypatch):
     assert bridge.Bridge.clip_keep(b, now) == 150          # low disk: the limit holds
     b.budget.cap = 300
     assert bridge.Bridge.clip_keep(b, now) == 300          # a quiet day: just the limit
+
+
+def test_sd_runs_are_counted_per_day_without_ids():
+    from zoneinfo import ZoneInfo
+    from tracker import Tracker
+    import json, tempfile, os
+    path = os.path.join(tempfile.mkdtemp(), "state.json")
+    tz = ZoneInfo("UTC")
+    published = []
+    b = types.SimpleNamespace(tracker=Tracker(path, tz), tz=tz, base="vicohome",
+                              pub=lambda topic, payload, retain=True: published.append((topic, payload)))
+    now = 1_800_000_000.0
+    bridge.Bridge.record_sd_run(b, "backfill", 6, 6, {"sessions": 1, "listed": True}, now)
+    bridge.Bridge.record_sd_run(b, "backfill", 6, 0, {"sessions": 2, "blocked": 1, "error": "no link"}, now + 60)
+    bridge.Bridge.record_sd_run(b, "test", 2, 1, {"sessions": 1, "blocked": 1}, now + 120)
+    last = bridge.Bridge.record_sd_run(b, "backfill", 6, 0, {"sessions": 2, "list_retries": 1,
+                                                              "error": "listing unanswered"}, now + 180)
+    day = b.tracker.sd_stats["days"][b.tracker.day_of(now)]
+    assert (day["runs"], day["complete"], day["asked"], day["pulled"], day["tests"]) == (4, 1, 20, 7, 1)
+    assert day["outcomes"] == {"ok": 1, "no link": 1, "stalled": 1, "listing unanswered": 1}
+    assert day["blocked"] == 2 and day["list_retries"] == 1
+    assert last["outcome"] == "listing unanswered" and last["sessions"] == 2
+    topic, payload = published[-1]
+    assert topic == "vicohome/sd" and payload["pulled"] == 7 and payload["days"][-1]["runs"] == 4
+    b.tracker.save()                                   # the counts survive a restart
+    assert Tracker(path, tz).sd_stats["days"][b.tracker.day_of(now)]["pulled"] == 7
+    for i in range(20):                                # only the last two weeks are kept
+        bridge.Bridge.record_sd_run(b, "backfill", 1, 1, {}, now + 86400 * (i + 1))
+    assert len(b.tracker.sd_stats["days"]) == bridge.SD_STATS_DAYS
+    assert "serial" not in json.dumps(b.tracker.sd_stats)
