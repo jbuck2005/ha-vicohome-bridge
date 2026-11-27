@@ -31,7 +31,7 @@ from clips import PERIOD_SLACK_S, TRUST_AFTER_S, ClipBudget, ClipMaker, mp4_seco
 from tracker import Tracker
 from vicohome import AuthError, Device, Event, VicohomeClient, VicohomeError
 
-VERSION = "0.4.4-dev.4"
+VERSION = "0.4.4-dev.5"
 LOG = logging.getLogger("vicohome")
 OPTIONS_FILE = "/data/options.json"
 STATE_FILE = "/data/state.json"
@@ -41,6 +41,7 @@ RECENT_IN_ATTRIBUTES = 10
 # Clip repair: how often the kept visits of the last REPAIR_WINDOW_S are checked against the cloud,
 # how soon after a start, and how many times one clip is made again before it is left alone.
 REPAIR_EVERY_S = 3600
+SD_STATS_DAYS = 14          # days of SD card run counts kept in the state file and the sensor
 KEEP_RECENT_S = 24 * 3600   # clips this young are kept past the limit on a busy day (up to clips_max)
 REPAIR_FIRST_AFTER_S = 120
 REPAIR_WINDOW_S = 48 * 3600
@@ -369,6 +370,11 @@ class Bridge:
                 cfg("button", "sd_test", {
                     "name": "Test SD fetch", "icon": "mdi:sd", "entity_category": "diagnostic",
                     "command_topic": self.sd_test_topic, "payload_press": "PRESS"})
+                cfg("sensor", "sd_clips_today", {
+                    "name": "SD clips today", "icon": "mdi:sd", "unit_of_measurement": "clips",
+                    "state_class": "total_increasing", "entity_category": "diagnostic",
+                    "state_topic": f"{self.base}/sd", "value_template": "{{ value_json.pulled }}",
+                    "json_attributes_topic": f"{self.base}/sd"})
             cfg("number", "refetch_hours", {
                 "name": "Re-fetch hours", "icon": "mdi:history", "entity_category": "config",
                 "command_topic": f"{self.refetch_hours_topic}/set", "state_topic": self.refetch_hours_topic,
@@ -552,6 +558,7 @@ class Bridge:
             LOG.info("SD backfill: fetching %d full clip(s) from camera %s's card", len(batch), serial)
             info: dict = {}
             got = fetch_sd_clips(self.api, serial, batch, iface_ip=iface, log=LOG, info=info)
+            Bridge.record_sd_run(self, "backfill", len(batch), len(got), info)
             if info.get("listed"):
                 # A try only counts once the camera answered the listing: a session that never came up
                 # says nothing about the visits, and must not use up their tries.
@@ -561,6 +568,53 @@ class Bridge:
                                                int(by_trace.get(trace_id, {}).get("sd_tries") or 0) + 1)
             if Bridge._save_sd_clips(self, serial, got):
                 self.publish_clip_storage()
+
+    def record_sd_run(self, kind: str, asked: int, pulled: int, info: dict, now: float | None = None) -> dict:
+        """Count one SD card run for the day (counts only: no ids, names or addresses) and publish them."""
+        now = time.time() if now is None else now
+        if pulled >= asked:
+            outcome = "ok"
+        elif info.get("error"):
+            outcome = info["error"]
+        elif info.get("blocked"):
+            outcome = "stalled"
+        else:
+            outcome = "partial" if pulled else "nothing pulled"
+        st = getattr(self.tracker, "sd_stats", None)
+        if st is None:
+            return {}
+        day = self.tracker.day_of(now)
+        d = st.setdefault("days", {}).setdefault(day, {"runs": 0, "complete": 0, "asked": 0, "pulled": 0,
+                                                       "tests": 0, "outcomes": {}})
+        d["runs"] += 1
+        d["tests"] += kind == "test"
+        d["complete"] += outcome == "ok"
+        d["asked"] += asked
+        d["pulled"] += pulled
+        d["outcomes"][outcome] = d["outcomes"].get(outcome, 0) + 1
+        for key in ("list_retries", "blocked"):
+            if info.get(key):
+                d[key] = d.get(key, 0) + int(info[key])
+        for old in sorted(st["days"])[:-SD_STATS_DAYS]:
+            del st["days"][old]
+        st["last"] = {"time": datetime.fromtimestamp(now, self.tz).isoformat(timespec="seconds"), "kind": kind,
+                      "asked": asked, "pulled": pulled, "outcome": outcome,
+                      "sessions": int(info.get("sessions") or 0)}
+        self.tracker.dirty = True
+        LOG.info("SD %s: %d of %d clip(s) (%s); today %d of %d from %d run(s)", kind, pulled, asked, outcome,
+                 d["pulled"], d["asked"], d["runs"])
+        Bridge.publish_sd_stats(self, now)
+        return st["last"]
+
+    def publish_sd_stats(self, now: float | None = None) -> None:
+        if not getattr(self, "base", None):
+            return
+        st = self.tracker.sd_stats
+        days = st.get("days") or {}
+        today = days.get(self.tracker.day_of(time.time() if now is None else now)) or \
+            {"runs": 0, "complete": 0, "asked": 0, "pulled": 0, "tests": 0, "outcomes": {}}
+        self.pub(f"{self.base}/sd", {**today, "last": st.get("last"),
+                                     "days": [{"date": k, **v} for k, v in sorted(days.items())[-SD_STATS_DAYS:]]})
 
     def _save_sd_clips(self, serial: str, got: dict) -> int:
         """Save clips fetched from the card over the existing ones; returns how many were saved."""
@@ -636,7 +690,9 @@ class Bridge:
                         LOG.info("SD test: camera %s has no card", serial)
                         continue
                     LOG.info("SD test: fetching the newest %d clip(s) from camera %s's card", len(batch), serial)
-                    got = fetch_sd_clips(self.api, serial, batch, iface_ip=iface, log=LOG)
+                    info: dict = {}
+                    got = fetch_sd_clips(self.api, serial, batch, iface_ip=iface, log=LOG, info=info)
+                    Bridge.record_sd_run(self, "test", len(batch), len(got), info)
                     saved = Bridge._save_sd_clips(self, serial, got)
                     LOG.info("SD test: camera %s gave %d of %d clip(s)", serial, saved, len(batch))
                     result["cameras"] += 1
@@ -688,6 +744,8 @@ class Bridge:
                 LOG.info("Clip audit %s skipped: the bridge did not see the whole day", day)
         self.tracker.dirty = True
         self.publish_clip_storage()
+        if clip_mode(self.opts) != "cloud_only":
+            self.publish_sd_stats(now)   # a new day starts at zero
 
     def _on_refetch_hours(self, client, userdata, msg) -> None:
         hours = hours_from(msg.payload, self.refetch_hours)
@@ -1068,6 +1126,8 @@ class Bridge:
             self.ensure_discovery(serial)
             self.publish_camera_state(serial, time.time())
         self.publish_clip_storage()
+        if self.clips and clip_mode(self.opts) != "cloud_only":
+            self.publish_sd_stats()
         failures = 0
         while not self.stop.is_set():
             wait = interval

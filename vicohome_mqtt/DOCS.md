@@ -134,6 +134,12 @@ press wakes the camera and briefly signs the phone app out, like any SD fetch. T
 runs and ends with `SD test: camera ... gave N of M clip(s)`. An automation can publish a number of clips
 per camera (1 to 6) to `<base_topic>/clips/sd_test` instead.
 
+`sensor.<cam>_sd_clips_today` (Diagnostic) counts the clips pulled from the card today. Its attributes give
+today's runs, complete runs, clips asked and pulled, test presses, why runs fell short (`stalled`, `no link`,
+`listing unanswered`, `partial`, `nothing pulled`), the last run, and the same per day for the last 14 days.
+It holds counts only (no ids, names or addresses) and survives restarts, so a whole day can be judged even
+after the log has rolled over.
+
 ## Security (AppArmor)
 The add-on runs under its own AppArmor profile (`apparmor.txt`). It may run Python, ffmpeg and ffprobe,
 write only to `/data`, `/tmp`, `/media` and `<config>/www`, and open IP sockets for MQTT, the cloud and

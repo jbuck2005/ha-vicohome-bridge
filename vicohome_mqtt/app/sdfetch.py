@@ -1054,12 +1054,15 @@ async def _run(api, serial: str, visits: list[tuple], iface_ip, per_clip_s, log,
     the whole data channel, so the session is closed and the rest are fetched in a fresh one, with the
     stuck recording tried last there by its next path (videoUrl, then one built from the name)."""
     out: dict = {}
+    info = {} if info is None else info
+    info.update(sessions=0, blocked=0, list_retries=0)
     want: dict | None = None
     alts: dict[str, list] = {}
     stuck: dict[str, int] = {}          # name -> index of the path to try next
     session, sessions, list_retry = 0, SESSIONS, LIST_RETRIES
     while session < sessions:
         session += 1
+        info["sessions"] += 1
         t = _Tunnel(api, serial, iface_ip, log)
         try:
             await t.connect()
@@ -1074,14 +1077,15 @@ async def _run(api, serial: str, visits: list[tuple], iface_ip, per_clip_s, log,
                     # more than the next hourly try would; it doesn't use up the blocked-clip session.
                     if list_retry <= 0:
                         log.warning("sdfetch: no answer to the card listing again; giving up for now")
+                        info["error"] = "listing unanswered"
                         break
                     list_retry -= 1
+                    info["list_retries"] += 1
                     sessions += 1
                     log.warning("sdfetch: no answer to the card listing; trying a fresh session")
                     continue
                 log.info("sdfetch: camera lists %d SD segments for the window", len(seg))
-                if info is not None:
-                    info["listed"] = True
+                info["listed"] = True
                 want, shared = assign_segments(seg, visits)
                 if shared:
                     log.info("sdfetch: %d visit(s) share a recording with a closer visit; they keep their cloud clip",
@@ -1104,6 +1108,7 @@ async def _run(api, serial: str, visits: list[tuple], iface_ip, per_clip_s, log,
                     log.info("sdfetch: pulled %s (%d bytes)", name, len(data))
                 elif t.stalled:
                     stuck[name] = i + 1
+                    info["blocked"] += 1
                     log.warning("sdfetch: %s blocked the session; %s", name,
                                 "trying the rest in a new session" if session < SESSIONS else "giving up for now")
                     break
@@ -1114,6 +1119,7 @@ async def _run(api, serial: str, visits: list[tuple], iface_ip, per_clip_s, log,
                 break   # every recording was tried without blocking the session
         except Exception as err:
             log.warning("sdfetch: session %d failed: %s", session, str(err) or err.__class__.__name__)
+            info["error"] = "no link" if "no link" in str(err) else "session failed"
             break
         finally:
             await t.close()
@@ -1172,4 +1178,6 @@ def fetch_sd_clips(api, serial: str, visits: list[tuple], iface_ip: str | None =
         return asyncio.run(_run(api, serial, list(visits), iface_ip, per_clip_s, log, info))
     except Exception as err:
         log.warning("sdfetch: session failed: %s", str(err) or err.__class__.__name__)
+        if info is not None:
+            info.setdefault("error", "session failed")
         return {}

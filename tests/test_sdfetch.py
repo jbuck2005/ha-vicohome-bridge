@@ -505,3 +505,16 @@ def test_delayed_ack_option(monkeypatch):
     assert sdfetch.SACK_EVERY[0] == 1
     bridge.sd_tuning({})
     assert sdfetch.SACK_EVERY[0] == 2
+
+
+def test_run_reports_sessions_blocks_and_retries(monkeypatch):
+    import asyncio
+    seg = [{"name": "a.mp4", "timestamp": 1000, "period": 20, "path": "/dl/a", "paths": [("downloadUrl", "/dl/a")]}]
+    sessions, gets, info = [], [], {}
+    monkeypatch.setattr(sdfetch, "_Tunnel", _listing_tunnel([None, seg], gets, sessions))
+    asyncio.run(sdfetch._run(None, "S", [("va", 1000)], None, 30, logging.getLogger("t"), info))
+    assert (info["sessions"], info["list_retries"], info["blocked"]) == (2, 1, 0) and "error" not in info
+    sessions.clear(); info = {}
+    monkeypatch.setattr(sdfetch, "_Tunnel", _listing_tunnel([None, None], gets, sessions))
+    asyncio.run(sdfetch._run(None, "S", [("va", 1000)], None, 30, logging.getLogger("t"), info))
+    assert info["error"] == "listing unanswered"

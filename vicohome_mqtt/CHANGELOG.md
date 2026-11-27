@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+- New `sensor.<cam>_sd_clips_today` (0.4.4-dev.5): daily counts of SD card runs, clips asked and pulled, and why
+  runs fell short, kept for 14 days across restarts (counts only). The Home Assistant log keeps about an hour,
+  too little to judge the card link over a day. Each run also logs a one-line summary. A measuring tool, not
+  a fix.
 - SD link: a fresh session when the camera never answers the card listing (0.4.4-dev.4). In one run the link
   came up but the camera sent no video and answered nothing; the run gave up and the visits waited an hour.
   The bridge now opens one more session at once (it doesn't use up the session kept for a blocked clip) and
