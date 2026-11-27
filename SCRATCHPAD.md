@@ -5,6 +5,11 @@ between sessions. It is never merged into `main` or `edge`.
 
 ---
 
+## 2026-11-27: SD clips today sensor (0.4.4-dev.5, PR #54)
+
+- I added `sensor.<cam>_sd_clips_today`. It counts card runs, clips asked for and pulled, and why each run fell short, per day for 14 days, and the counts survive restarts. It holds counts only. It's a measuring tool, because the HA log only keeps about an hour.
+- On the dev.4 morning failures (11-26, 07:22 and 08:22): they were around sunrise, but the camera had recordings and listed them. Both runs stalled partway through sending a clip. Two runs at dawn are too few to call it a regression; the sensor will show whether failures cluster at certain times.
+
 ## 2026-11-26 morning: first look at dev.4 on the camera
 
 - dev.4 is installed. HA only kept 07:22 to 08:24 of the log.
